@@ -16,7 +16,14 @@ import {
   revokeRefreshToken,
   revokeAllRefreshTokens,
 } from "./auth.service.js";
-import { consumeResetGrant, issueOtp, resendLoginVerification, verifyEmailOtp, verifyLoginOtp, verifyResetOtp } from "./otp.service.js";
+import {
+  consumeResetGrant,
+  issueOtp,
+  resendLoginVerification,
+  verifyEmailOtp,
+  verifyLoginOtp,
+  verifyResetOtp,
+} from "./otp.service.js";
 import type { AuthenticatedRequest } from "./auth.types.js";
 
 const cookieOptions = () => ({
@@ -56,7 +63,12 @@ export const verifyEmail = async (request: Request, response: Response) => {
   if (input.challengeId) {
     const userId = await verifyLoginOtp(input.email, input.code, input.challengeId);
     const user = await import("./user.model.js").then(({ User }) => User.findById(userId));
-    if (!user) return response.status(401).json({ status: "error", code: "AUTHENTICATION_REQUIRED", message: "Authentication required" });
+    if (!user)
+      return response.status(401).json({
+        status: "error",
+        code: "AUTHENTICATION_REQUIRED",
+        message: "Authentication required",
+      });
     return sendAuth(response, await createSessionForUser(user));
   }
   await verifyEmailOtp(input.email, input.code);
@@ -110,7 +122,10 @@ export const resetPassword = async (request: Request, response: Response) => {
   return response.json({ status: "reset" });
 };
 export const login = async (request: Request, response: Response) =>
-  sendAuth(response, await loginUser({ ...loginSchema.parse(request.body), ipAddress: request.ip ?? "unknown" }));
+  sendAuth(
+    response,
+    await loginUser({ ...loginSchema.parse(request.body), ipAddress: request.ip ?? "unknown" }),
+  );
 export const refresh = async (request: Request, response: Response) => {
   const token = request.cookies.faultline_refresh as string | undefined;
   if (!token)

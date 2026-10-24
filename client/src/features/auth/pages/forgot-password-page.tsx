@@ -48,33 +48,76 @@ export function ForgotPasswordPage() {
         <div>
           <p className="text-sm font-semibold text-foreground">FaultLine</p>
           <h1 className="mt-2 font-serif text-4xl">Reset your password</h1>
-          <p className="mt-2 text-sm text-muted-foreground">We'll help you get back into your account.</p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            We'll help you get back into your account.
+          </p>
         </div>
         <div className="space-y-5">
           {step === "email" && (
             <Field label="Email">
-              <input className="field" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+              <input
+                className="field"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+              />
             </Field>
           )}
-          {step === "code" && <OtpVerification email={email} purpose="reset" onVerified={(value) => { if (typeof value === "string") { setGrant(value); setStep("password"); } }} />}
+          {step === "code" && (
+            <OtpVerification
+              email={email}
+              purpose="reset"
+              onVerified={(value) => {
+                if (typeof value === "string") {
+                  setGrant(value);
+                  setStep("password");
+                }
+              }}
+            />
+          )}
           {step === "password" && (
             <>
               <Field label="New password">
-                <PasswordInput value={password} onChange={(event) => { setPassword(event.target.value); setPasswordError(""); }} autoComplete="new-password" />
+                <PasswordInput
+                  value={password}
+                  onChange={(event) => {
+                    setPassword(event.target.value);
+                    setPasswordError("");
+                  }}
+                  autoComplete="new-password"
+                />
               </Field>
               <Field label="Confirm password" error={passwordError}>
-                <PasswordInput value={confirmPassword} onChange={(event) => { setConfirmPassword(event.target.value); setPasswordError(""); }} autoComplete="new-password" />
+                <PasswordInput
+                  value={confirmPassword}
+                  onChange={(event) => {
+                    setConfirmPassword(event.target.value);
+                    setPasswordError("");
+                  }}
+                  autoComplete="new-password"
+                />
               </Field>
             </>
           )}
         </div>
-        {step !== "code" && <button
-          disabled={isSubmitting}
-          className="flex h-11 w-full items-center justify-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
-          onClick={() => void submit()}
-        >
-          {isSubmitting ? <LoadingSpinner label={step === "email" ? "Sending code..." : "Resetting password..."} /> : step === "email" ? "Send reset code" : "Reset password"}
-        </button>}
+        {step !== "code" && (
+          <button
+            disabled={isSubmitting}
+            className="flex h-11 w-full items-center justify-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={() => void submit()}
+          >
+            {isSubmitting ? (
+              <LoadingSpinner
+                label={step === "email" ? "Sending code..." : "Resetting password..."}
+              />
+            ) : step === "email" ? (
+              "Send reset code"
+            ) : (
+              "Reset password"
+            )}
+          </button>
+        )}
         <Link className="block text-center text-sm underline" to="/login">
           Back to sign in
         </Link>

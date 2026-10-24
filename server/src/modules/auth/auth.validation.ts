@@ -27,7 +27,10 @@ export const emailOtpSchema = z.object({
   code: z.string().regex(/^\d{6}$/, "Enter the six-digit code."),
   challengeId: z.string().min(1).optional(),
 });
-export const emailSchema = z.object({ email: z.string().trim().email().max(254), challengeId: z.string().min(1).optional() });
+export const emailSchema = z.object({
+  email: z.string().trim().email().max(254),
+  challengeId: z.string().min(1).optional(),
+});
 export const resetPasswordSchema = z.object({
   grant: z.string().min(1),
   password: z.string().min(8, "Password must be at least 8 characters.").max(128),

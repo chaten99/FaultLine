@@ -3,7 +3,12 @@ import { Schema, model } from "mongoose";
 const otpChallengeSchema = new Schema(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", default: null, index: true },
-    pendingLoginId: { type: Schema.Types.ObjectId, ref: "PendingLogin", default: null, index: true },
+    pendingLoginId: {
+      type: Schema.Types.ObjectId,
+      ref: "PendingLogin",
+      default: null,
+      index: true,
+    },
     email: { type: String, required: true, index: true },
     purpose: {
       type: String,

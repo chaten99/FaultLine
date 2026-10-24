@@ -16,7 +16,9 @@ export function OtpVerification({
   email: string;
   purpose: Purpose;
   challengeId?: string;
-  onVerified: (value?: string | { accessToken: string; user: { id: string; name: string; email: string } }) => void;
+  onVerified: (
+    value?: string | { accessToken: string; user: { id: string; name: string; email: string } },
+  ) => void;
 }) {
   const [code, setCode] = useState("");
   const [isVerifying, setIsVerifying] = useState(false);
@@ -62,7 +64,8 @@ export function OtpVerification({
   const resend = async () => {
     setIsResending(true);
     try {
-      if (purpose === "email" || purpose === "login") await resendVerification({ email, challengeId });
+      if (purpose === "email" || purpose === "login")
+        await resendVerification({ email, challengeId });
       else await forgotPassword({ email });
       setCode("");
       setInvalid(false);
@@ -94,7 +97,9 @@ export function OtpVerification({
           aria-invalid={invalid}
           autoFocus
         />
-        {invalid && <p className="text-xs text-destructive">That code is invalid or has expired.</p>}
+        {invalid && (
+          <p className="text-xs text-destructive">That code is invalid or has expired.</p>
+        )}
       </div>
       <button
         type="button"
@@ -102,7 +107,17 @@ export function OtpVerification({
         onClick={() => void verify()}
         className="flex h-11 w-full items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {isVerifying ? <LoadingSpinner label={purpose === "email" || purpose === "login" ? "Verifying email..." : "Verifying code..."} /> : "Verify code"}
+        {isVerifying ? (
+          <LoadingSpinner
+            label={
+              purpose === "email" || purpose === "login"
+                ? "Verifying email..."
+                : "Verifying code..."
+            }
+          />
+        ) : (
+          "Verify code"
+        )}
       </button>
       <button
         type="button"
@@ -110,7 +125,15 @@ export function OtpVerification({
         onClick={() => void resend()}
         className="w-full text-center text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {isResending ? <span className="inline-flex items-center gap-2"><LoadingSpinner label="Sending code..." /></span> : cooldown > 0 ? `Resend code in ${cooldown}s` : "Resend code"}
+        {isResending ? (
+          <span className="inline-flex items-center gap-2">
+            <LoadingSpinner label="Sending code..." />
+          </span>
+        ) : cooldown > 0 ? (
+          `Resend code in ${cooldown}s`
+        ) : (
+          "Resend code"
+        )}
       </button>
     </div>
   );

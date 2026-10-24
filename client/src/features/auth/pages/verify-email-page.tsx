@@ -9,7 +9,11 @@ export function VerifyEmailPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const setSession = useAuthStore((state) => state.setSession);
-  const state = location.state as { email?: string; challengeId?: string; purpose?: "email" | "login" } | null;
+  const state = location.state as {
+    email?: string;
+    challengeId?: string;
+    purpose?: "email" | "login";
+  } | null;
   const email = state?.email ?? params.get("email") ?? "";
   const purpose = state?.purpose ?? "email";
   return (

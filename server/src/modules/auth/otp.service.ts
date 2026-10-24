@@ -60,7 +60,8 @@ export const issueOtp = async (input: {
   challenge.digest = digest(String(challenge._id), email, input.purpose, value);
   await challenge.save();
   try {
-    if (input.purpose === "email_verification") await sendVerificationEmail(email, value, input.name);
+    if (input.purpose === "email_verification")
+      await sendVerificationEmail(email, value, input.name);
     else await sendPasswordResetEmail(email, value, input.name);
     challenge.deliveryStatus = "sent";
     await challenge.save();
@@ -79,7 +80,12 @@ export const issueOtp = async (input: {
 export const hashContinuation = (value: string) =>
   crypto.createHmac("sha256", env.OTP_HASH_SECRET).update(`login:${value}`).digest("hex");
 
-export const startLoginVerification = async (user: { id: string; email: string; name: string; ipAddress: string }) => {
+export const startLoginVerification = async (user: {
+  id: string;
+  email: string;
+  name: string;
+  ipAddress: string;
+}) => {
   const rawChallenge = crypto.randomBytes(32).toString("hex");
   const pending = await PendingLogin.create({
     userId: user.id,
@@ -104,7 +110,11 @@ export const startLoginVerification = async (user: { id: string; email: string; 
   return { challengeId: rawChallenge, email: user.email };
 };
 
-export const resendLoginVerification = async (rawChallenge: string, emailInput: string, ipAddress: string) => {
+export const resendLoginVerification = async (
+  rawChallenge: string,
+  emailInput: string,
+  ipAddress: string,
+) => {
   const email = normalizeEmail(emailInput);
   const pending = await PendingLogin.findOne({
     digest: hashContinuation(rawChallenge),
@@ -113,10 +123,27 @@ export const resendLoginVerification = async (rawChallenge: string, emailInput: 
     supersededAt: null,
     expiresAt: { $gt: new Date() },
   });
-  if (!pending) throw createApiError("That verification session is invalid or has expired.", 401, "INVALID_OTP");
+  if (!pending)
+    throw createApiError(
+      "That verification session is invalid or has expired.",
+      401,
+      "INVALID_OTP",
+    );
   const user = await User.findById(pending.userId);
-  if (!user) throw createApiError("That verification session is invalid or has expired.", 401, "INVALID_OTP");
-  await issueOtp({ email, userId: String(user._id), purpose: "email_verification", ipAddress, name: user.name, pendingLoginId: String(pending._id) });
+  if (!user)
+    throw createApiError(
+      "That verification session is invalid or has expired.",
+      401,
+      "INVALID_OTP",
+    );
+  await issueOtp({
+    email,
+    userId: String(user._id),
+    purpose: "email_verification",
+    ipAddress,
+    name: user.name,
+    pendingLoginId: String(pending._id),
+  });
 };
 
 export const verifyLoginOtp = async (emailInput: string, value: string, rawChallenge: string) => {
@@ -129,7 +156,11 @@ export const verifyLoginOtp = async (emailInput: string, value: string, rawChall
     expiresAt: { $gt: new Date() },
   });
   if (!pending || !pending.otpChallengeId)
-    throw createApiError("That verification session is invalid or has expired.", 401, "INVALID_OTP");
+    throw createApiError(
+      "That verification session is invalid or has expired.",
+      401,
+      "INVALID_OTP",
+    );
   const challenge = await OtpChallenge.findOne({
     _id: pending.otpChallengeId,
     email,
@@ -139,11 +170,18 @@ export const verifyLoginOtp = async (emailInput: string, value: string, rawChall
     consumedAt: null,
     supersededAt: null,
   });
-  if (!challenge || challenge.expiresAt.getTime() <= Date.now() || challenge.attempts >= env.OTP_MAX_ATTEMPTS)
+  if (
+    !challenge ||
+    challenge.expiresAt.getTime() <= Date.now() ||
+    challenge.attempts >= env.OTP_MAX_ATTEMPTS
+  )
     throw createApiError("That code is invalid or has expired.", 401, "INVALID_OTP");
   const expected = digest(String(challenge._id), email, "email_verification", value);
   if (!crypto.timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(challenge.digest, "hex"))) {
-    await OtpChallenge.updateOne({ _id: challenge._id, consumedAt: null }, { $inc: { attempts: 1 } });
+    await OtpChallenge.updateOne(
+      { _id: challenge._id, consumedAt: null },
+      { $inc: { attempts: 1 } },
+    );
     throw createApiError("That code is invalid or has expired.", 401, "INVALID_OTP");
   }
   const consumed = await OtpChallenge.findOneAndUpdate(

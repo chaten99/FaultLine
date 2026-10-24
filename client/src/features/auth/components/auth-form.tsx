@@ -44,7 +44,8 @@ export function AuthForm({ mode }: { mode: Mode }) {
         axios.isAxiosError(error) &&
         error.response?.data?.code === "LOGIN_VERIFICATION_REQUIRED"
       ) {
-        const data = error.response.data.data as { challengeId?: string; email?: string } | undefined;
+        const data = error.response.data.data as
+          { challengeId?: string; email?: string } | undefined;
         if (data?.challengeId && data.email) {
           toast.info("Verify your email to finish signing in.");
           navigate("/verify-email", {
