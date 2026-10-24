@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+coverage/
+.env
+.env.*
+!.env.example
+!.env.test.example
+!.env.docker.example
+*.log
+.npm/
+.DS_Store
+*.pem
+*.key
+.husky/_/

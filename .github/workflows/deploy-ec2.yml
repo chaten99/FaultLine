@@ -1,0 +1,49 @@
+name: Deploy EC2
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: vars.ENABLE_EC2_DEPLOY == 'true'
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.EC2_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 644 "$HOME/.ssh/known_hosts"
+      - name: Synchronize source
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_APP_DIR: ${{ vars.EC2_APP_DIR }}
+        run: |
+          rsync -az --delete --exclude='.git' --exclude='node_modules' --exclude='dist' --exclude='coverage' --exclude='*.env' --exclude='.env*' ./ "$EC2_USER@$EC2_HOST:$EC2_APP_DIR/"
+      - name: Deploy and verify
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_APP_DIR: ${{ vars.EC2_APP_DIR }}
+        run: ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$EC2_USER@$EC2_HOST" "bash '$EC2_APP_DIR/deploy/ec2/deploy.sh' '$EC2_APP_DIR'"
