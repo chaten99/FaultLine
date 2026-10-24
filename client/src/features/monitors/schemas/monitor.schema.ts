@@ -59,10 +59,11 @@ export const monitorFormSchema = z.object({
 export type MonitorFormValues = z.infer<typeof monitorFormSchema>;
 
 export const parseStatusCodes = (raw: string): number[] => {
-  return raw
+  const codes = raw
     .split(",")
     .map((s) => Number(s.trim()))
     .filter((n) => Number.isInteger(n) && n >= 100 && n <= 599);
+  return Array.from(new Set(codes));
 };
 
 export const formatStatusCodes = (codes: number[]): string => {

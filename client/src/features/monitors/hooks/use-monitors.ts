@@ -11,12 +11,18 @@ import {
 } from "../api/monitors.api";
 import { getApiErrorMessage } from "@/lib/api-error";
 
+export type MonitorSortField = "createdAt" | "name" | "intervalSeconds" | "url";
+export type MonitorSortOrder = "asc" | "desc";
+
 export function useMonitors() {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [status, setStatus] = useState<"all" | "active" | "paused">("all");
+  const [sortBy, setSortBy] = useState<MonitorSortField>("createdAt");
+  const [sortOrder, setSortOrder] = useState<MonitorSortOrder>("desc");
   const [pendingStatusId, setPendingStatusId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -27,16 +33,28 @@ export function useMonitors() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const queryKey = ["monitors", { page, search: debouncedSearch.trim(), status }];
+  const queryKey = [
+    "monitors",
+    {
+      page,
+      pageSize,
+      search: debouncedSearch.trim(),
+      status,
+      sortBy,
+      sortOrder,
+    },
+  ];
 
   const { data, isLoading, isFetching, error, refetch } = useQuery({
     queryKey,
     queryFn: async () => {
       const response = await listMonitors({
         page,
-        pageSize: 10,
+        pageSize,
         search: debouncedSearch.trim() || undefined,
         status: status === "all" ? undefined : status,
+        sortBy,
+        sortOrder,
       });
       return response.data;
     },
@@ -46,6 +64,24 @@ export function useMonitors() {
     setSearch("");
     setDebouncedSearch("");
     setStatus("all");
+    setSortBy("createdAt");
+    setSortOrder("desc");
+    setPage(1);
+  };
+
+  const toggleSort = (field: MonitorSortField) => {
+    if (sortBy === field) {
+      setSortOrder((current) => (current === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(field);
+      setSortOrder(field === "createdAt" ? "desc" : "asc");
+    }
+    setPage(1);
+  };
+
+  const setSorting = (field: MonitorSortField, order: MonitorSortOrder) => {
+    setSortBy(field);
+    setSortOrder(order);
     setPage(1);
   };
 
@@ -97,10 +133,19 @@ export function useMonitors() {
     paused: data?.items?.filter((m) => !m.active).length ?? 0,
   };
 
+  const hasActiveFilters = Boolean(
+    search.trim() || status !== "all" || sortBy !== "createdAt" || sortOrder !== "desc",
+  );
+
   return {
     monitors: data?.items ?? [],
     page,
     setPage,
+    pageSize,
+    setPageSize: (size: number) => {
+      setPageSize(size);
+      setPage(1);
+    },
     totalPages: data?.totalPages ?? 1,
     totalCount: data?.total ?? 0,
     search,
@@ -110,8 +155,12 @@ export function useMonitors() {
       setStatus(newStatus);
       setPage(1);
     },
+    sortBy,
+    sortOrder,
+    toggleSort,
+    setSorting,
     resetFilters,
-    hasActiveFilters: Boolean(search.trim() || status !== "all"),
+    hasActiveFilters,
     counts,
     isLoading,
     isFetching,

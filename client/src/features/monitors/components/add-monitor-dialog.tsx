@@ -53,7 +53,14 @@ export function AddMonitorDialog({ open, onOpenChange, onCreate }: AddMonitorDia
           </DialogDescription>
         </DialogHeader>
 
-        <MonitorForm mode="create" onSubmit={handleSubmit} onCancel={() => onOpenChange(false)} />
+        {open && (
+          <MonitorForm
+            key={`add-monitor-${open}`}
+            mode="create"
+            onSubmit={handleSubmit}
+            onCancel={() => onOpenChange(false)}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

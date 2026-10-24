@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { HelpCircle } from "lucide-react";
+import axios from "axios";
+import { Globe, HelpCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SpinnerCustom } from "@/components/common/loading-spinner";
 import {
   formatInterval,
@@ -24,6 +25,7 @@ import {
 } from "../schemas/monitor.schema";
 import type { Monitor, MonitorInput } from "../api/monitors.api";
 import { getApiErrorMessage, getApiFieldErrors } from "@/lib/api-error";
+import { cn } from "@/lib/utils";
 
 interface MonitorFormProps {
   mode: "create" | "edit";
@@ -31,6 +33,28 @@ interface MonitorFormProps {
   onSubmit: (data: MonitorInput) => Promise<void>;
   onCancel: () => void;
 }
+
+const intervalLabels: Record<number, string> = {
+  60: "Every 1m (60s)",
+  300: "Every 5m (Recommended)",
+  600: "Every 10m",
+  900: "Every 15m",
+  1800: "Every 30m",
+  3600: "Every 1 hour",
+};
+
+const timeoutPresets = [
+  { label: "5s", value: 5000 },
+  { label: "10s", value: 10000 },
+  { label: "15s", value: 15000 },
+  { label: "30s", value: 30000 },
+];
+
+const statusCodePresets = [
+  { label: "200 OK", value: "200" },
+  { label: "2xx Success", value: "200, 201, 204" },
+  { label: "2xx + 3xx", value: "200, 201, 301, 302" },
+];
 
 export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFormProps) {
   const [apiError, setApiError] = useState<string | null>(null);
@@ -57,9 +81,12 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
   } = useForm<MonitorFormValues>({
     resolver: zodResolver(monitorFormSchema),
     defaultValues,
+    mode: "onBlur",
   });
 
   const selectedInterval = watch("intervalSeconds");
+  const currentTimeout = watch("timeoutMs");
+  const currentStatusCodes = watch("expectedStatusCodes");
   const activeChecked = watch("active");
 
   const submitHandler = async (values: MonitorFormValues) => {
@@ -82,6 +109,19 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
       for (const [key, val] of Object.entries(fieldErrors)) {
         if (key in defaultValues) {
           setError(key as keyof MonitorFormValues, { message: val });
+        }
+      }
+      if (axios.isAxiosError(err)) {
+        const code = err.response?.data?.code;
+        if (code === "INVALID_MONITOR_URL" || code === "SSRF_PROHIBITED_DESTINATION") {
+          setError("url", {
+            message: err.response?.data?.message || "Invalid or restricted endpoint URL.",
+          });
+        }
+        if (code === "INVALID_MONITOR_CONFIG") {
+          setError("intervalSeconds", {
+            message: err.response?.data?.message || "Invalid monitor configuration.",
+          });
         }
       }
     }
@@ -124,21 +164,46 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="monitor-url">
-            Endpoint URL <span className="text-destructive">*</span>
-          </Label>
-          <Input
-            id="monitor-url"
-            type="url"
-            placeholder="https://api.example.com/health"
-            disabled={isSubmitting}
-            aria-invalid={Boolean(errors.url)}
-            aria-describedby={errors.url ? "monitor-url-error" : undefined}
-            {...register("url")}
-          />
-          {errors.url && (
+          <div className="flex items-center gap-1.5">
+            <Label htmlFor="monitor-url">
+              Endpoint URL <span className="text-destructive">*</span>
+            </Label>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex text-muted-foreground hover:text-foreground focus:outline-none"
+                  aria-label="URL guidance"
+                >
+                  <HelpCircle className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs text-xs">
+                Public HTTP or HTTPS endpoint to probe. Localhost and private IP addresses are
+                blocked for security.
+              </TooltipContent>
+            </Tooltip>
+          </div>
+          <div className="relative">
+            <Globe className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            <Input
+              id="monitor-url"
+              type="url"
+              placeholder="https://api.example.com/health"
+              disabled={isSubmitting}
+              className="pl-9"
+              aria-invalid={Boolean(errors.url)}
+              aria-describedby={errors.url ? "monitor-url-error" : "monitor-url-hint"}
+              {...register("url")}
+            />
+          </div>
+          {errors.url ? (
             <p id="monitor-url-error" className="text-xs text-destructive">
               {errors.url.message}
+            </p>
+          ) : (
+            <p id="monitor-url-hint" className="text-[11px] text-muted-foreground">
+              Must be a publicly accessible HTTP or HTTPS URL without embedded credentials.
             </p>
           )}
         </div>
@@ -151,7 +216,24 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="monitor-method">HTTP method</Label>
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="monitor-method">HTTP method</Label>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex text-muted-foreground hover:text-foreground focus:outline-none"
+                    aria-label="Method guidance"
+                  >
+                    <HelpCircle className="size-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs text-xs">
+                  HTTP probe method. Currently FaultLine probes with GET. Additional methods and
+                  custom headers will be available soon.
+                </TooltipContent>
+              </Tooltip>
+            </div>
             <Select
               defaultValue="GET"
               disabled
@@ -164,7 +246,7 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
                 <SelectItem value="GET">GET</SelectItem>
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-[11px] text-muted-foreground">
               GET is currently the only supported method.
             </p>
           </div>
@@ -172,8 +254,8 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
           <div className="space-y-2">
             <div className="flex items-center gap-1.5">
               <Label htmlFor="monitor-interval">Check interval</Label>
-              <Popover>
-                <PopoverTrigger asChild>
+              <Tooltip>
+                <TooltipTrigger asChild>
                   <button
                     type="button"
                     className="inline-flex text-muted-foreground hover:text-foreground focus:outline-none"
@@ -181,15 +263,12 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
                   >
                     <HelpCircle className="size-3.5" />
                   </button>
-                </PopoverTrigger>
-                <PopoverContent className="w-72 text-xs leading-relaxed">
-                  <p className="font-semibold text-foreground">Monitoring interval</p>
-                  <p className="mt-1 text-muted-foreground">
-                    Controls how frequently FaultLine probes this endpoint. Shorter intervals detect
-                    outages faster, while longer intervals reduce query volume on your service.
-                  </p>
-                </PopoverContent>
-              </Popover>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs text-xs">
+                  Controls how frequently FaultLine executes probes. 5 minutes is recommended for
+                  balanced coverage.
+                </TooltipContent>
+              </Tooltip>
             </div>
             <Select
               value={String(selectedInterval)}
@@ -206,7 +285,7 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
               <SelectContent>
                 {monitorIntervals.map((seconds) => (
                   <SelectItem key={seconds} value={String(seconds)}>
-                    Every {formatInterval(seconds)}
+                    {intervalLabels[seconds] ?? `Every ${formatInterval(seconds)}`}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -221,8 +300,8 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
           <div className="space-y-2">
             <div className="flex items-center gap-1.5">
               <Label htmlFor="monitor-timeout">Timeout (ms)</Label>
-              <Popover>
-                <PopoverTrigger asChild>
+              <Tooltip>
+                <TooltipTrigger asChild>
                   <button
                     type="button"
                     className="inline-flex text-muted-foreground hover:text-foreground focus:outline-none"
@@ -230,15 +309,12 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
                   >
                     <HelpCircle className="size-3.5" />
                   </button>
-                </PopoverTrigger>
-                <PopoverContent className="w-72 text-xs leading-relaxed">
-                  <p className="font-semibold text-foreground">Request timeout</p>
-                  <p className="mt-1 text-muted-foreground">
-                    Maximum time FaultLine waits for a response before considering the request timed
-                    out. Must be between 1,000ms and 30,000ms.
-                  </p>
-                </PopoverContent>
-              </Popover>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs text-xs">
+                  Maximum response wait time before marking probe timed out. Must be between 1,000ms
+                  and 30,000ms.
+                </TooltipContent>
+              </Tooltip>
             </div>
             <Input
               id="monitor-timeout"
@@ -252,6 +328,25 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
               aria-describedby={errors.timeoutMs ? "monitor-timeout-error" : undefined}
               {...register("timeoutMs", { valueAsNumber: true })}
             />
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              <span className="text-[11px] text-muted-foreground">Presets:</span>
+              {timeoutPresets.map((preset) => (
+                <button
+                  key={preset.value}
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => setValue("timeoutMs", preset.value, { shouldValidate: true })}
+                  className={cn(
+                    "rounded border px-1.5 py-0.5 text-[11px] font-mono transition-colors",
+                    currentTimeout === preset.value
+                      ? "border-foreground bg-foreground text-background"
+                      : "border-border bg-background text-muted-foreground hover:border-foreground/40 hover:text-foreground",
+                  )}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
             {errors.timeoutMs && (
               <p id="monitor-timeout-error" className="text-xs text-destructive">
                 {errors.timeoutMs.message}
@@ -262,8 +357,8 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
           <div className="space-y-2">
             <div className="flex items-center gap-1.5">
               <Label htmlFor="monitor-status-codes">Expected status codes</Label>
-              <Popover>
-                <PopoverTrigger asChild>
+              <Tooltip>
+                <TooltipTrigger asChild>
                   <button
                     type="button"
                     className="inline-flex text-muted-foreground hover:text-foreground focus:outline-none"
@@ -271,15 +366,12 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
                   >
                     <HelpCircle className="size-3.5" />
                   </button>
-                </PopoverTrigger>
-                <PopoverContent className="w-72 text-xs leading-relaxed">
-                  <p className="font-semibold text-foreground">Expected HTTP status codes</p>
-                  <p className="mt-1 text-muted-foreground">
-                    Comma-separated list of HTTP status codes (100–599) that indicate your service
-                    is functioning properly (e.g. 200, 201, 204).
-                  </p>
-                </PopoverContent>
-              </Popover>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs text-xs">
+                  HTTP response codes considered healthy (100–599). Any response code not in this
+                  list is reported as a failure.
+                </TooltipContent>
+              </Tooltip>
             </div>
             <Input
               id="monitor-status-codes"
@@ -291,6 +383,27 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
               }
               {...register("expectedStatusCodes")}
             />
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              <span className="text-[11px] text-muted-foreground">Presets:</span>
+              {statusCodePresets.map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() =>
+                    setValue("expectedStatusCodes", preset.value, { shouldValidate: true })
+                  }
+                  className={cn(
+                    "rounded border px-1.5 py-0.5 text-[11px] font-mono transition-colors",
+                    currentStatusCodes === preset.value
+                      ? "border-foreground bg-foreground text-background"
+                      : "border-border bg-background text-muted-foreground hover:border-foreground/40 hover:text-foreground",
+                  )}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
             {errors.expectedStatusCodes && (
               <p id="monitor-status-codes-error" className="text-xs text-destructive">
                 {errors.expectedStatusCodes.message}

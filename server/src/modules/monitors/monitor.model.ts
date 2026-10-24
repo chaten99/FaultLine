@@ -22,4 +22,7 @@ const monitorSchema = new Schema(
 );
 
 monitorSchema.index({ userId: 1, createdAt: -1 });
+monitorSchema.index({ userId: 1, active: 1, createdAt: -1 });
+monitorSchema.index({ userId: 1, name: 1 });
+monitorSchema.index({ userId: 1, intervalSeconds: 1, createdAt: -1 });
 export const Monitor = model("Monitor", monitorSchema);

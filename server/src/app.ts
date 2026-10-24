@@ -22,7 +22,8 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization", "X-CSRF-Token", "X-Request-ID"],
   }),
 );
-app.use(express.json({ limit: "100kb" }));
+app.use(express.json({ limit: "10kb" }));
+app.use(express.urlencoded({ extended: false, limit: "10kb" }));
 app.use(cookieParser());
 app.use(requestLogger);
 app.use("/api", healthRouter);

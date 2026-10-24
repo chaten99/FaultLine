@@ -35,6 +35,8 @@ export type ListMonitorsParams = {
   pageSize?: number;
   search?: string;
   status?: "all" | "active" | "paused";
+  sortBy?: "createdAt" | "name" | "intervalSeconds" | "url";
+  sortOrder?: "asc" | "desc";
 };
 
 export const listMonitors = (params: number | ListMonitorsParams = 1) => {

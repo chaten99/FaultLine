@@ -12,6 +12,7 @@ import { ForgotPasswordPage } from "@/features/auth/pages/forgot-password-page";
 import { VerifyEmailPage } from "@/features/auth/pages/verify-email-page";
 import { DashboardPage } from "@/features/dashboard/pages/dashboard-page";
 import { MonitorsPage } from "@/features/monitors/pages/monitors-page";
+import { MonitorDetailsPage } from "@/features/monitors/pages/monitor-details-page";
 
 export default function App() {
   const [queryClient] = useState(
@@ -90,6 +91,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <MonitorsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/monitors/:id"
+            element={
+              <ProtectedRoute>
+                <MonitorDetailsPage />
               </ProtectedRoute>
             }
           />

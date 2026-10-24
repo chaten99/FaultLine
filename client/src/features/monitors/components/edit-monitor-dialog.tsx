@@ -59,13 +59,15 @@ export function EditMonitorDialog({
           <DialogDescription>Update your API endpoint configuration.</DialogDescription>
         </DialogHeader>
 
-        <MonitorForm
-          key={monitor._id}
-          mode="edit"
-          initialData={monitor}
-          onSubmit={handleSubmit}
-          onCancel={() => onOpenChange(false)}
-        />
+        {open && (
+          <MonitorForm
+            key={`${monitor._id}-${monitor.updatedAt || ""}-${open}`}
+            mode="edit"
+            initialData={monitor}
+            onSubmit={handleSubmit}
+            onCancel={() => onOpenChange(false)}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

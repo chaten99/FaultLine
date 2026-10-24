@@ -1,4 +1,5 @@
-import { MoreHorizontal, Pause, Pencil, Play, Trash2 } from "lucide-react";
+import { Eye, MoreHorizontal, Pause, Pencil, Play, Trash2 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -34,7 +35,7 @@ export function MonitorActions({
             <Button
               variant="ghost"
               size="icon"
-              className="size-8 p-0 hover:bg-accent text-muted-foreground hover:text-foreground"
+              className="size-8 p-0 text-muted-foreground hover:bg-accent hover:text-foreground"
               aria-label={`More actions for ${monitor.name}`}
               disabled={isPending}
             >
@@ -46,6 +47,13 @@ export function MonitorActions({
       </Tooltip>
 
       <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuItem asChild>
+          <Link to={`/monitors/${monitor._id}`} className="flex items-center gap-2">
+            <Eye className="size-4" />
+            <span>View details</span>
+          </Link>
+        </DropdownMenuItem>
+
         <DropdownMenuItem onClick={() => onEdit(monitor)}>
           <Pencil className="size-4" />
           <span>Edit monitor</span>

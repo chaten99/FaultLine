@@ -1,4 +1,5 @@
-import { Copy } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Calendar, Copy } from "lucide-react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -13,10 +14,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { MonitorActions } from "./monitor-actions";
 import { formatInterval, formatStatusCodes } from "../schemas/monitor.schema";
 import type { Monitor } from "../api/monitors.api";
+import type { MonitorSortField, MonitorSortOrder } from "../hooks/use-monitors";
 
 interface MonitorListProps {
   monitors: Monitor[];
   pendingStatusId?: string | null;
+  sortBy?: MonitorSortField;
+  sortOrder?: MonitorSortOrder;
+  onToggleSort?: (field: MonitorSortField) => void;
   onEdit: (monitor: Monitor) => void;
   onToggleStatus: (monitor: Monitor) => void;
   onDelete: (monitor: Monitor) => void;
@@ -25,6 +30,9 @@ interface MonitorListProps {
 export function MonitorList({
   monitors,
   pendingStatusId,
+  sortBy,
+  sortOrder,
+  onToggleSort,
   onEdit,
   onToggleStatus,
   onDelete,
@@ -51,18 +59,75 @@ export function MonitorList({
     }
   };
 
+  const renderSortIcon = (field: MonitorSortField) => {
+    if (sortBy !== field) {
+      return <ArrowUpDown className="size-3 text-muted-foreground/50" />;
+    }
+    return sortOrder === "asc" ? (
+      <ArrowUp className="size-3 text-foreground" />
+    ) : (
+      <ArrowDown className="size-3 text-foreground" />
+    );
+  };
+
   return (
     <div>
       <div className="hidden rounded-lg border border-border bg-card md:block">
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className="w-[34%]">Endpoint</TableHead>
-              <TableHead className="w-[10%]">Method</TableHead>
-              <TableHead className="w-[16%]">Interval & Timeout</TableHead>
-              <TableHead className="w-[12%]">Expected Status</TableHead>
-              <TableHead className="w-[14%]">Status</TableHead>
-              <TableHead className="w-[14%] text-right">Actions</TableHead>
+              <TableHead className="w-[30%]">
+                {onToggleSort ? (
+                  <button
+                    type="button"
+                    onClick={() => onToggleSort("name")}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <span>Endpoint</span>
+                    {renderSortIcon("name")}
+                  </button>
+                ) : (
+                  "Endpoint"
+                )}
+              </TableHead>
+
+              <TableHead className="w-[9%]">Method</TableHead>
+
+              <TableHead className="w-[15%]">
+                {onToggleSort ? (
+                  <button
+                    type="button"
+                    onClick={() => onToggleSort("intervalSeconds")}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <span>Interval</span>
+                    {renderSortIcon("intervalSeconds")}
+                  </button>
+                ) : (
+                  "Interval"
+                )}
+              </TableHead>
+
+              <TableHead className="w-[11%]">Expected</TableHead>
+
+              <TableHead className="w-[13%]">Status</TableHead>
+
+              <TableHead className="w-[11%]">
+                {onToggleSort ? (
+                  <button
+                    type="button"
+                    onClick={() => onToggleSort("createdAt")}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <span>Created</span>
+                    {renderSortIcon("createdAt")}
+                  </button>
+                ) : (
+                  "Created"
+                )}
+              </TableHead>
+
+              <TableHead className="w-[11%] text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -70,7 +135,12 @@ export function MonitorList({
               <TableRow key={monitor._id}>
                 <TableCell>
                   <div className="min-w-0">
-                    <p className="truncate font-medium text-foreground">{monitor.name}</p>
+                    <Link
+                      to={`/monitors/${monitor._id}`}
+                      className="truncate font-medium text-foreground hover:underline"
+                    >
+                      {monitor.name}
+                    </Link>
                     <div className="mt-1 flex items-center gap-1.5">
                       <span
                         className="max-w-xs truncate text-xs text-muted-foreground"
@@ -138,6 +208,12 @@ export function MonitorList({
                   </div>
                 </TableCell>
 
+                <TableCell>
+                  <span className="text-xs text-muted-foreground">
+                    {formatDate(monitor.createdAt)}
+                  </span>
+                </TableCell>
+
                 <TableCell className="text-right">
                   <div className="flex items-center justify-end">
                     <MonitorActions
@@ -164,7 +240,12 @@ export function MonitorList({
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <h4 className="truncate font-medium text-foreground">{monitor.name}</h4>
+                  <Link
+                    to={`/monitors/${monitor._id}`}
+                    className="truncate font-medium text-foreground hover:underline"
+                  >
+                    {monitor.name}
+                  </Link>
                   {monitor.active ? (
                     <Badge variant="outline" className="gap-1 text-[11px] text-foreground shrink-0">
                       <span className="size-1.5 rounded-full bg-foreground" />
@@ -233,9 +314,10 @@ export function MonitorList({
             </div>
 
             {monitor.createdAt && (
-              <p className="mt-2 text-[11px] text-muted-foreground">
-                Added {formatDate(monitor.createdAt)}
-              </p>
+              <div className="mt-2.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <Calendar className="size-3" />
+                <span>Added {formatDate(monitor.createdAt)}</span>
+              </div>
             )}
           </article>
         ))}

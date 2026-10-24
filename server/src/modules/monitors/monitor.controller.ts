@@ -24,7 +24,15 @@ const userId = (request: Request) => {
 export const list = async (request: Request, response: Response) => {
   const query = listMonitorSchema.parse(request.query);
   return response.json(
-    await listMonitors(userId(request), query.page, query.pageSize, query.search, query.status),
+    await listMonitors(
+      userId(request),
+      query.page,
+      query.pageSize,
+      query.search,
+      query.status,
+      query.sortBy,
+      query.sortOrder,
+    ),
   );
 };
 

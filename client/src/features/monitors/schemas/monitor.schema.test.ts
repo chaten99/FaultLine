@@ -71,6 +71,7 @@ describe("monitor schema and helpers", () => {
     expect(parseStatusCodes("200, 201, 204")).toEqual([200, 201, 204]);
     expect(parseStatusCodes("  200 ,  500 ")).toEqual([200, 500]);
     expect(parseStatusCodes("invalid, 200, 999")).toEqual([200]);
+    expect(parseStatusCodes("200, 200, 201")).toEqual([200, 201]);
   });
 
   it("formats status codes correctly", () => {
