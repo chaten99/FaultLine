@@ -1,10 +1,50 @@
 import request from "supertest";
 import mongoose from "mongoose";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { app } from "../src/app.js";
-import { env } from "../src/config/env.js";
 import { createAccessToken } from "../src/modules/auth/auth-token.service.js";
 import { Monitor } from "../src/modules/monitors/monitor.model.js";
+
+type MockMonitor = {
+  _id: string;
+  userId: string;
+  name: string;
+  url: string;
+  method: string;
+  intervalSeconds: number;
+  timeoutMs: number;
+  expectedStatusCodes: number[];
+  active: boolean;
+  __v: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const filterItems = (list: MockMonitor[], filter: Record<string, unknown>): MockMonitor[] => {
+  return list.filter((m) => {
+    if (filter.userId && m.userId !== String(filter.userId)) return false;
+    if (typeof filter.active === "boolean" && m.active !== filter.active) return false;
+    if (filter.$or && Array.isArray(filter.$or)) {
+      const clauses = filter.$or as Array<{
+        name?: { $regex: string; $options?: string };
+        url?: { $regex: string; $options?: string };
+      }>;
+      const matchesOr = clauses.some((clause) => {
+        if (clause.name?.$regex) {
+          const reg = new RegExp(clause.name.$regex, clause.name.$options);
+          return reg.test(m.name);
+        }
+        if (clause.url?.$regex) {
+          const reg = new RegExp(clause.url.$regex, clause.url.$options);
+          return reg.test(m.url);
+        }
+        return false;
+      });
+      if (!matchesOr) return false;
+    }
+    return true;
+  });
+};
 
 describe("Monitor API Integration Tests", () => {
   const userAId = new mongoose.Types.ObjectId().toString();
@@ -12,17 +52,112 @@ describe("Monitor API Integration Tests", () => {
   const tokenA = createAccessToken(userAId);
   const tokenB = createAccessToken(userBId);
 
-  beforeAll(async () => {
-    if (mongoose.connection.readyState === 0) {
-      await mongoose.connect(env.MONGODB_URI);
-    }
+  let store: MockMonitor[] = [];
+
+  beforeEach(() => {
+    store = [];
+
+    (vi.spyOn(Monitor, "create") as unknown as MockInstance).mockImplementation(
+      async (doc: unknown) => {
+        const item: MockMonitor = {
+          _id: new mongoose.Types.ObjectId().toString(),
+          __v: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          ...(doc as Record<string, unknown>),
+        } as MockMonitor;
+        store.push(item);
+        return item;
+      },
+    );
+
+    (vi.spyOn(Monitor, "findOne") as unknown as MockInstance).mockImplementation(
+      (query: unknown) => {
+        const q = query as Record<string, unknown>;
+        const found = store.find((m) => {
+          if (q._id && m._id !== String(q._id)) return false;
+          if (q.userId && m.userId !== String(q.userId)) return false;
+          return true;
+        });
+        return Promise.resolve(found ? { ...found } : null);
+      },
+    );
+
+    (vi.spyOn(Monitor, "findOneAndUpdate") as unknown as MockInstance).mockImplementation(
+      (query: unknown, update: unknown) => {
+        const q = query as Record<string, unknown>;
+        const u = update as { $set?: Record<string, unknown>; $inc?: { __v?: number } };
+        const index = store.findIndex((m) => {
+          if (q._id && m._id !== String(q._id)) return false;
+          if (q.userId && m.userId !== String(q.userId)) return false;
+          if (typeof q.__v === "number" && m.__v !== q.__v) return false;
+          return true;
+        });
+        if (index === -1) return Promise.resolve(null);
+
+        const current = store[index]!;
+        const updated: MockMonitor = {
+          ...current,
+          ...(u.$set || {}),
+          __v: current.__v + 1,
+          updatedAt: new Date().toISOString(),
+        } as MockMonitor;
+        store[index] = updated;
+        return Promise.resolve({ ...updated });
+      },
+    );
+
+    (vi.spyOn(Monitor, "deleteOne") as unknown as MockInstance).mockImplementation(
+      async (query: unknown) => {
+        const q = query as Record<string, unknown>;
+        const prevLen = store.length;
+        store = store.filter((m) => {
+          if (q._id && m._id === String(q._id) && q.userId && m.userId === String(q.userId)) {
+            return false;
+          }
+          return true;
+        });
+        return { deletedCount: prevLen - store.length };
+      },
+    );
+
+    (vi.spyOn(Monitor, "countDocuments") as unknown as MockInstance).mockImplementation(
+      async (filter: unknown) => {
+        return filterItems(store, (filter || {}) as Record<string, unknown>).length;
+      },
+    );
+
+    (vi.spyOn(Monitor, "find") as unknown as MockInstance).mockImplementation((filter: unknown) => {
+      let matched = filterItems(store, (filter || {}) as Record<string, unknown>);
+      const chain = {
+        sort(sortObj: Record<string, 1 | -1>) {
+          const field = Object.keys(sortObj)[0] as keyof MockMonitor;
+          const dir = sortObj[field] ?? 1;
+          matched.sort((a, b) => {
+            if (a[field] < b[field]) return -1 * dir;
+            if (a[field] > b[field]) return 1 * dir;
+            return 0;
+          });
+          return chain;
+        },
+        skip(n: number) {
+          matched = matched.slice(n);
+          return chain;
+        },
+        limit(n: number) {
+          matched = matched.slice(0, n);
+          return chain;
+        },
+        lean() {
+          return Promise.resolve(matched.map((m) => ({ ...m })));
+        },
+      };
+      return chain;
+    });
   });
 
-  afterAll(async () => {
-    await Monitor.deleteMany({ userId: { $in: [userAId, userBId] } });
-    if (mongoose.connection.readyState !== 0) {
-      await mongoose.disconnect();
-    }
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("enforces authentication on all monitor endpoints", async () => {
