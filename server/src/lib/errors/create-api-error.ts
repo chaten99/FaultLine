@@ -11,7 +11,10 @@ export type ApiErrorCode =
   | "OTP_COOLDOWN"
   | "OTP_DELIVERY_FAILED"
   | "INVALID_RESET_GRANT"
-  | "LOGIN_VERIFICATION_REQUIRED";
+  | "LOGIN_VERIFICATION_REQUIRED"
+  | "MONITOR_NOT_FOUND"
+  | "INVALID_MONITOR_URL"
+  | "INVALID_MONITOR_CONFIG";
 
 export type ApiError = Error & {
   statusCode: number;
