@@ -24,6 +24,7 @@ export const errorHandler: ErrorRequestHandler = (error, _request, response, _ne
       code: error.code,
       message: error.message,
       ...(error.fieldErrors ? { fieldErrors: error.fieldErrors } : {}),
+      ...("data" in error && error.data ? { data: error.data } : {}),
     });
     return;
   }

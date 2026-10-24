@@ -4,10 +4,12 @@ import { createAccessToken } from "./auth-token.service.js";
 import {
   issueRefreshToken,
   revokeRefreshToken,
+  revokeAllRefreshTokens,
   rotateRefreshToken,
 } from "./refresh-token.service.js";
 import type { AuthResult, SafeUser } from "./auth.types.js";
 import { createApiError } from "../../lib/errors/create-api-error.js";
+import { startLoginVerification } from "./otp.service.js";
 
 const toSafeUser = (user: { _id: unknown; name: string; email: string }): SafeUser => ({
   id: String(user._id),
@@ -25,11 +27,20 @@ const resultFor = async (user: {
   expiresIn: 600,
 });
 
+export const createSessionForUser = async (user: {
+  _id: unknown;
+  name: string;
+  email: string;
+}): Promise<AuthResult & { refreshToken: string }> => ({
+  ...(await resultFor(user)),
+  refreshToken: await issueRefreshToken(String(user._id)),
+});
+
 export const registerUser = async (input: {
   name: string;
   email: string;
   password: string;
-}): Promise<AuthResult & { refreshToken: string }> => {
+}): Promise<{ userId: string; email: string }> => {
   const email = input.email.toLowerCase();
   let user;
   try {
@@ -49,17 +60,31 @@ export const registerUser = async (input: {
     }
     throw error;
   }
-  return { ...(await resultFor(user)), refreshToken: await issueRefreshToken(String(user._id)) };
+  return { userId: String(user._id), email };
 };
 
 export const loginUser = async (input: {
   email: string;
   password: string;
+  ipAddress: string;
 }): Promise<AuthResult & { refreshToken: string }> => {
   const user = await User.findOne({ email: input.email.toLowerCase() }).select("+passwordHash");
   if (!user || !(await argon2.verify(user.passwordHash, input.password)))
     throw createApiError("Invalid email or password.", 401, "INVALID_CREDENTIALS");
-  return { ...(await resultFor(user)), refreshToken: await issueRefreshToken(String(user._id)) };
+  if (!user.emailVerifiedAt)
+    throw createApiError(
+      "Verify your email to finish signing in.",
+      403,
+      "LOGIN_VERIFICATION_REQUIRED",
+      undefined,
+      await startLoginVerification({
+        id: String(user._id),
+        email: user.email,
+        name: user.name,
+        ipAddress: input.ipAddress,
+      }),
+    );
+  return createSessionForUser(user);
 };
 
 export const refreshUser = async (
@@ -82,6 +107,7 @@ export const getUser = async (userId: string): Promise<SafeUser | null> => {
 };
 
 export { revokeRefreshToken };
+export { revokeAllRefreshTokens };
 
 const isDuplicateEmailError = (error: unknown): boolean =>
   typeof error === "object" &&

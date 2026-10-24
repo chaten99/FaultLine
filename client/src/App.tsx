@@ -7,6 +7,8 @@ import { currentUser, refresh } from "@/features/auth/api/auth.api";
 import { useAuthStore } from "@/features/auth/store/auth.store";
 import { LoginPage } from "@/features/auth/pages/login-page";
 import { RegisterPage } from "@/features/auth/pages/register-page";
+import { ForgotPasswordPage } from "@/features/auth/pages/forgot-password-page";
+import { VerifyEmailPage } from "@/features/auth/pages/verify-email-page";
 import { DashboardPage } from "@/features/dashboard/pages/dashboard-page";
 
 export default function App() {
@@ -25,6 +27,22 @@ export default function App() {
   return (
     <TooltipProvider delayDuration={350}>
       <Routes>
+        <Route
+          path="/forgot-password"
+          element={
+            <PublicRoute>
+              <ForgotPasswordPage />
+            </PublicRoute>
+          }
+        />
+        <Route
+          path="/verify-email"
+          element={
+            <PublicRoute>
+              <VerifyEmailPage />
+            </PublicRoute>
+          }
+        />
         <Route
           path="/login"
           element={

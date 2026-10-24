@@ -5,6 +5,7 @@ type ApiErrorResponse = {
   code?: string;
   message?: string;
   fieldErrors?: Record<string, string>;
+  data?: Record<string, unknown>;
 };
 
 export const getApiFieldErrors = (error: unknown): Record<string, string> => {

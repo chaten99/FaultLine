@@ -1,0 +1,11 @@
+<%
+const body = `
+  <h1 style="margin:0 0 16px;font-size:28px;line-height:1.2;">Verify your email address</h1>
+  <p style="margin:0 0 20px;">Hi ${name},</p>
+  <p style="margin:0 0 24px;color:#525252;">Thanks for signing up for FaultLine. Enter the verification code below to confirm your email address.</p>
+  <div style="margin:0 0 24px;padding:20px;text-align:center;background:#171717;color:#ffffff;font-size:32px;font-weight:700;letter-spacing:10px;">${code}</div>
+  <p style="margin:0 0 8px;color:#525252;">This code expires in ${expiryMinutes} minutes.</p>
+  <p style="margin:24px 0 0;color:#737373;font-size:13px;">If you did not create a FaultLine account, you can safely ignore this email.</p>
+`;
+%>
+<%- include("../layouts/email-layout.ejs", { subject: "Verify your FaultLine email", body }) %>

@@ -23,6 +23,14 @@ const environmentSchema = z.object({
   JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().positive().default(600),
   JWT_REFRESH_IDLE_TTL_DAYS: z.coerce.number().int().positive().default(7),
   JWT_REFRESH_ABSOLUTE_TTL_DAYS: z.coerce.number().int().positive().default(30),
+  RESEND_API_KEY: z.string().min(1).default("re_development_placeholder"),
+  RESEND_FROM_EMAIL: z.string().min(1).default("FaultLine <no-reply@example.com>"),
+  OTP_HASH_SECRET: z.string().min(32).default("development-otp-hash-secret-change-me-123456"),
+  OTP_CODE_TTL_SECONDS: z.coerce.number().int().positive().default(300),
+  OTP_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(60),
+  OTP_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  OTP_MAX_SENDS_PER_HOUR: z.coerce.number().int().positive().default(5),
+  PASSWORD_RESET_GRANT_TTL_SECONDS: z.coerce.number().int().positive().default(600),
 });
 
 const parsedEnvironment = environmentSchema.safeParse(process.env);

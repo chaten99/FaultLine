@@ -63,3 +63,7 @@ export const revokeRefreshToken = async (token: string | undefined) => {
     return;
   }
 };
+
+export const revokeAllRefreshTokens = async (userId: string) => {
+  await RefreshTokenFamily.updateMany({ userId, revokedAt: null }, { revokedAt: new Date() });
+};
