@@ -12,10 +12,11 @@ export function Spinner({ className, ...props }: React.ComponentProps<"svg">) {
   );
 }
 
-export function SpinnerCustom() {
+export function SpinnerCustom({ className, children, ...props }: React.ComponentProps<"div">) {
   return (
-    <div className="flex items-center gap-4">
+    <div className={cn("inline-flex items-center gap-2", className)} {...props}>
       <Spinner />
+      {children}
     </div>
   );
 }

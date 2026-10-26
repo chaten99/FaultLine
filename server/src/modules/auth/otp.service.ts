@@ -65,6 +65,11 @@ export const issueOtp = async (input: {
     else await sendPasswordResetEmail(email, value, input.name);
     challenge.deliveryStatus = "sent";
     await challenge.save();
+    if (input.pendingLoginId)
+      await PendingLogin.updateOne(
+        { _id: input.pendingLoginId, consumedAt: null },
+        { otpChallengeId: challenge._id },
+      );
   } catch {
     challenge.deliveryStatus = "failed";
     await challenge.save();

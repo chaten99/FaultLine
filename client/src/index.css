@@ -62,11 +62,113 @@ body {
   padding: 0.625rem 0.75rem;
   font-size: 0.875rem;
   outline: none;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
 }
 
 .field:focus {
   border-color: var(--ring);
   box-shadow: 0 0 0 2px color-mix(in oklch, var(--ring) 25%, transparent);
+}
+
+@keyframes overlayFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes overlayFadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes modalContentShow {
+  from {
+    opacity: 0;
+    scale: 0.96;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+@keyframes modalContentHide {
+  from {
+    opacity: 1;
+    scale: 1;
+  }
+  to {
+    opacity: 0;
+    scale: 0.96;
+  }
+}
+
+@keyframes dropdownShow {
+  from {
+    opacity: 0;
+    scale: 0.97;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+@keyframes dropdownHide {
+  from {
+    opacity: 1;
+    scale: 1;
+  }
+  to {
+    opacity: 0;
+    scale: 0.97;
+  }
+}
+
+.dialog-overlay[data-state="open"] {
+  animation: overlayFadeIn 150ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.dialog-overlay[data-state="closed"] {
+  animation: overlayFadeOut 100ms ease-in forwards;
+}
+
+.dialog-content {
+  transform-origin: center center;
+}
+
+.dialog-content[data-state="open"] {
+  animation: modalContentShow 180ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.dialog-content[data-state="closed"] {
+  animation: modalContentHide 120ms ease-in forwards;
+}
+
+.floating-content {
+  transform-origin: var(--radix-popper-transform-origin, center);
+}
+
+.floating-content[data-state="open"] {
+  animation: dropdownShow 150ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.floating-content[data-state="closed"] {
+  animation: dropdownHide 100ms ease-in forwards;
+}
+
+.tooltip-content[data-state="delayed-open"],
+.tooltip-content[data-state="instant-open"] {
+  animation: dropdownShow 120ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 [data-sonner-toaster] [data-sonner-toast] {
@@ -77,6 +179,7 @@ body {
   box-shadow:
     0 4px 6px -1px rgb(0 0 0 / 0.08),
     0 2px 4px -2px rgb(0 0 0 / 0.08);
+  transition: all 150ms ease;
 }
 
 [data-sonner-toaster] [data-sonner-toast][data-type="error"] {
@@ -87,6 +190,7 @@ body {
   border-color: var(--border);
   background: var(--background);
   color: var(--muted-foreground);
+  transition: all 150ms ease;
 }
 
 [data-sonner-toaster] [data-sonner-toast] [data-close-button]:hover {
