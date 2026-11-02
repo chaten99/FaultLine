@@ -59,7 +59,7 @@ export const enqueueImmediateCheck = async (
       queuedAt: new Date().toISOString(),
     },
     {
-      jobId: manual ? `manual:${runId}` : `init:${monitorId}:${Date.now()}`,
+      jobId: manual ? `manual-${runId}` : `init-${monitorId}-${Date.now()}`,
     },
   );
   return job.id ?? runId;

@@ -74,7 +74,6 @@ export const processMonitorCheckJob = async (job: Job<MonitorCheckJobData>): Pro
           monitorId: monitor._id,
           userId: monitor.userId,
           runId,
-          startedAt: new Date(),
           expiresAt,
         },
       },

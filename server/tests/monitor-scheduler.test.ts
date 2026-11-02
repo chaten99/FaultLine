@@ -53,7 +53,7 @@ describe("Monitor Scheduler Service", () => {
     expect(mockQueue.add).toHaveBeenCalledWith(
       "manual-monitor-check",
       expect.objectContaining({ monitorId: "mon-1", manual: true }),
-      expect.objectContaining({ jobId: expect.stringMatching(/^manual:/) }),
+      expect.objectContaining({ jobId: expect.stringMatching(/^manual-/) }),
     );
   });
 
@@ -64,7 +64,7 @@ describe("Monitor Scheduler Service", () => {
     expect(mockQueue.add).toHaveBeenCalledWith(
       "initial-monitor-check",
       expect.objectContaining({ monitorId: "mon-1", manual: false }),
-      expect.objectContaining({ jobId: expect.stringMatching(/^init:mon-1:/) }),
+      expect.objectContaining({ jobId: expect.stringMatching(/^init-mon-1-/) }),
     );
   });
 
