@@ -20,6 +20,8 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test:
@@ -32,6 +34,20 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks: [faultline]
+  worker:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    command: ["node", "dist/src/worker.js"]
+    env_file:
+      - ./server/.env.docker.example
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
     networks: [faultline]
   mongodb:
     image: mongo:8
@@ -46,6 +62,8 @@ services:
     networks: [faultline]
   redis:
     image: redis:8-alpine
+    ports:
+      - "127.0.0.1:6380:6379"
     expose: ["6379"]
     volumes: [redis-data:/data]
     restart: unless-stopped

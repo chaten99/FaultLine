@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { PageLoader } from "@/components/common/page-loader";
-import { currentUser, refresh } from "@/features/auth/api/auth.api";
+import { refresh } from "@/features/auth/api/auth.api";
 import { useAuthStore } from "@/features/auth/store/auth.store";
 import { LoginPage } from "@/features/auth/pages/login-page";
 import { RegisterPage } from "@/features/auth/pages/register-page";
@@ -33,10 +33,7 @@ export default function App() {
 
   useEffect(() => {
     void refresh()
-      .then(async ({ data }) => {
-        const userResponse = await currentUser();
-        setSession(userResponse.data.user, data.accessToken);
-      })
+      .then(({ data }) => setSession(data.user, data.accessToken))
       .catch(() => clearSession());
   }, [clearSession, setSession]);
 

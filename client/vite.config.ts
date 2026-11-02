@@ -9,4 +9,10 @@ export default defineConfig({
       "@": new URL("./src", import.meta.url).pathname,
     },
   },
+  server: {
+    proxy: {
+      "/api": { target: "http://localhost:4000", changeOrigin: true },
+      "/socket.io": { target: "http://localhost:4000", ws: true },
+    },
+  },
 });

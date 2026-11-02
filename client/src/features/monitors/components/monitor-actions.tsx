@@ -1,4 +1,4 @@
-import { Eye, MoreHorizontal, Pause, Pencil, Play, Trash2 } from "lucide-react";
+import { Eye, MoreHorizontal, Pause, Pencil, Play, RefreshCw, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,18 +15,24 @@ import type { Monitor } from "../api/monitors.api";
 interface MonitorActionsProps {
   monitor: Monitor;
   isPending?: boolean;
+  isChecking?: boolean;
   onEdit: (monitor: Monitor) => void;
   onToggleStatus: (monitor: Monitor) => void;
   onDelete: (monitor: Monitor) => void;
+  onCheckNow?: (monitor: Monitor) => void;
 }
 
 export function MonitorActions({
   monitor,
   isPending = false,
+  isChecking = false,
   onEdit,
   onToggleStatus,
   onDelete,
+  onCheckNow,
 }: MonitorActionsProps) {
+  const isLoading = isPending || isChecking;
+
   return (
     <DropdownMenu>
       <Tooltip>
@@ -37,9 +43,9 @@ export function MonitorActions({
               size="icon"
               className="size-8 p-0 text-muted-foreground hover:bg-accent hover:text-foreground"
               aria-label={`More actions for ${monitor.name}`}
-              disabled={isPending}
+              disabled={isLoading}
             >
-              {isPending ? <Spinner className="size-4" /> : <MoreHorizontal className="size-4" />}
+              {isLoading ? <Spinner className="size-4" /> : <MoreHorizontal className="size-4" />}
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
@@ -53,6 +59,16 @@ export function MonitorActions({
             <span>View details</span>
           </Link>
         </DropdownMenuItem>
+
+        {onCheckNow && (
+          <DropdownMenuItem
+            onClick={() => onCheckNow(monitor)}
+            disabled={isLoading || !monitor.active}
+          >
+            <RefreshCw className="size-4" />
+            <span>Check now</span>
+          </DropdownMenuItem>
+        )}
 
         <DropdownMenuItem onClick={() => onEdit(monitor)}>
           <Pencil className="size-4" />

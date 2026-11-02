@@ -12,6 +12,8 @@ import {
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { MonitorActions } from "./monitor-actions";
+import { MonitorStatusBadge } from "./monitor-status-badge";
+import { formatRelativeTime } from "../lib/monitor-status";
 import { formatInterval, formatStatusCodes } from "../schemas/monitor.schema";
 import type { Monitor } from "../api/monitors.api";
 import type { MonitorSortField, MonitorSortOrder } from "../hooks/use-monitors";
@@ -19,23 +21,27 @@ import type { MonitorSortField, MonitorSortOrder } from "../hooks/use-monitors";
 interface MonitorListProps {
   monitors: Monitor[];
   pendingStatusId?: string | null;
+  pendingCheckId?: string | null;
   sortBy?: MonitorSortField;
   sortOrder?: MonitorSortOrder;
   onToggleSort?: (field: MonitorSortField) => void;
   onEdit: (monitor: Monitor) => void;
   onToggleStatus: (monitor: Monitor) => void;
   onDelete: (monitor: Monitor) => void;
+  onCheckNow?: (monitor: Monitor) => void;
 }
 
 export function MonitorList({
   monitors,
   pendingStatusId,
+  pendingCheckId,
   sortBy,
   sortOrder,
   onToggleSort,
   onEdit,
   onToggleStatus,
   onDelete,
+  onCheckNow,
 }: MonitorListProps) {
   const copyToClipboard = async (url: string) => {
     try {
@@ -76,7 +82,7 @@ export function MonitorList({
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className="w-[30%]">
+              <TableHead className="w-[28%]">
                 {onToggleSort ? (
                   <button
                     type="button"
@@ -91,9 +97,9 @@ export function MonitorList({
                 )}
               </TableHead>
 
-              <TableHead className="w-[9%]">Method</TableHead>
+              <TableHead className="w-[8%]">Method</TableHead>
 
-              <TableHead className="w-[15%]">
+              <TableHead className="w-[14%]">
                 {onToggleSort ? (
                   <button
                     type="button"
@@ -108,9 +114,9 @@ export function MonitorList({
                 )}
               </TableHead>
 
-              <TableHead className="w-[11%]">Expected</TableHead>
+              <TableHead className="w-[10%]">Expected</TableHead>
 
-              <TableHead className="w-[13%]">Status</TableHead>
+              <TableHead className="w-[18%]">Status</TableHead>
 
               <TableHead className="w-[11%]">
                 {onToggleSort ? (
@@ -188,23 +194,31 @@ export function MonitorList({
 
                 <TableCell>
                   <div>
-                    {monitor.active ? (
-                      <Badge
-                        variant="outline"
-                        className="gap-1 border-foreground/30 text-foreground"
-                      >
-                        <span className="size-1.5 rounded-full bg-foreground" />
-                        Active
-                      </Badge>
-                    ) : (
-                      <Badge variant="muted" className="gap-1 text-muted-foreground">
-                        <span className="size-1.5 rounded-full bg-muted-foreground/60" />
-                        Paused
-                      </Badge>
-                    )}
-                    <span className="mt-1 block text-[11px] text-muted-foreground">
-                      Not checked yet
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <MonitorStatusBadge monitor={monitor} />
+                      {!monitor.active && (
+                        <Badge variant="muted" className="gap-1 text-[11px] text-muted-foreground">
+                          Paused
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                      {monitor.lastCheckAt ? (
+                        <>
+                          <span>Checked {formatRelativeTime(monitor.lastCheckAt)}</span>
+                          {typeof monitor.lastResponseDurationMs === "number" && (
+                            <>
+                              <span>·</span>
+                              <span className="font-mono">{monitor.lastResponseDurationMs}ms</span>
+                            </>
+                          )}
+                        </>
+                      ) : (
+                        <span>
+                          {monitor.active ? "Pending initial check" : "Monitoring suspended"}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </TableCell>
 
@@ -219,9 +233,11 @@ export function MonitorList({
                     <MonitorActions
                       monitor={monitor}
                       isPending={pendingStatusId === monitor._id}
+                      isChecking={pendingCheckId === monitor._id}
                       onEdit={onEdit}
                       onToggleStatus={onToggleStatus}
                       onDelete={onDelete}
+                      onCheckNow={onCheckNow}
                     />
                   </div>
                 </TableCell>
@@ -246,17 +262,12 @@ export function MonitorList({
                   >
                     {monitor.name}
                   </Link>
-                  {monitor.active ? (
-                    <Badge variant="outline" className="gap-1 text-[11px] text-foreground shrink-0">
-                      <span className="size-1.5 rounded-full bg-foreground" />
-                      Active
-                    </Badge>
-                  ) : (
+                  <MonitorStatusBadge monitor={monitor} />
+                  {!monitor.active && (
                     <Badge
                       variant="muted"
                       className="gap-1 text-[11px] text-muted-foreground shrink-0"
                     >
-                      <span className="size-1.5 rounded-full bg-muted-foreground/60" />
                       Paused
                     </Badge>
                   )}
@@ -284,9 +295,11 @@ export function MonitorList({
               <MonitorActions
                 monitor={monitor}
                 isPending={pendingStatusId === monitor._id}
+                isChecking={pendingCheckId === monitor._id}
                 onEdit={onEdit}
                 onToggleStatus={onToggleStatus}
                 onDelete={onDelete}
+                onCheckNow={onCheckNow}
               />
             </div>
 
@@ -308,8 +321,18 @@ export function MonitorList({
                 </span>
               </div>
               <div>
-                <span className="text-muted-foreground">Check status: </span>
-                <span className="text-muted-foreground">Not checked yet</span>
+                <span className="text-muted-foreground">Last checked: </span>
+                <span className="text-foreground">
+                  {monitor.lastCheckAt
+                    ? `${formatRelativeTime(monitor.lastCheckAt)}${
+                        typeof monitor.lastResponseDurationMs === "number"
+                          ? ` (${monitor.lastResponseDurationMs}ms)`
+                          : ""
+                      }`
+                    : monitor.active
+                      ? "Pending"
+                      : "Suspended"}
+                </span>
               </div>
             </div>
 

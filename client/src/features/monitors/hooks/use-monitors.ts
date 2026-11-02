@@ -5,6 +5,7 @@ import {
   createMonitor,
   deleteMonitor,
   listMonitors,
+  triggerCheckNow,
   updateMonitor,
   type Monitor,
   type MonitorInput,
@@ -24,6 +25,7 @@ export function useMonitors() {
   const [sortBy, setSortBy] = useState<MonitorSortField>("createdAt");
   const [sortOrder, setSortOrder] = useState<MonitorSortOrder>("desc");
   const [pendingStatusId, setPendingStatusId] = useState<string | null>(null);
+  const [pendingCheckId, setPendingCheckId] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -127,6 +129,23 @@ export function useMonitors() {
     },
   });
 
+  const triggerCheckMutation = useMutation({
+    mutationFn: async (monitor: Monitor) => {
+      setPendingCheckId(monitor._id);
+      return triggerCheckNow(monitor._id);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["monitors"] });
+      toast.success("Check queued successfully.");
+    },
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err));
+    },
+    onSettled: () => {
+      setPendingCheckId(null);
+    },
+  });
+
   const counts = data?.counts ?? {
     total: data?.total ?? 0,
     active: data?.items?.filter((m) => m.active).length ?? 0,
@@ -170,6 +189,8 @@ export function useMonitors() {
     updateMutation,
     toggleStatusMutation,
     deleteMutation,
+    triggerCheckMutation,
     pendingStatusId,
+    pendingCheckId,
   };
 }

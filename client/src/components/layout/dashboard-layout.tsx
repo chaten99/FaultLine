@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { disconnectMonitorSocket } from "@/features/monitors/realtime/monitor-socket";
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -31,6 +32,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       toast.error("We couldn't complete sign out. Please try again.");
       return;
     }
+    disconnectMonitorSocket();
     clearSession();
     navigate("/login", { replace: true });
   };

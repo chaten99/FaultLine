@@ -59,7 +59,9 @@ export function MonitorManagement() {
     updateMutation,
     toggleStatusMutation,
     deleteMutation,
+    triggerCheckMutation,
     pendingStatusId,
+    pendingCheckId,
   } = useMonitors();
 
   const [addOpen, setAddOpen] = useState(false);
@@ -246,12 +248,14 @@ export function MonitorManagement() {
             <MonitorList
               monitors={monitors}
               pendingStatusId={pendingStatusId}
+              pendingCheckId={pendingCheckId}
               sortBy={sortBy}
               sortOrder={sortOrder}
               onToggleSort={toggleSort}
               onEdit={handleEdit}
               onToggleStatus={handleToggleStatus}
               onDelete={handleDelete}
+              onCheckNow={(monitor) => triggerCheckMutation.mutate(monitor)}
             />
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-border pt-4 text-xs text-muted-foreground">

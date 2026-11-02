@@ -1,7 +1,18 @@
 import { Types } from "mongoose";
 import { Monitor } from "./monitor.model.js";
+import { MonitorCheck } from "../checks/monitor-check.model.js";
 import { createApiError } from "../../lib/errors/create-api-error.js";
 import { validateMonitorUrl } from "./monitor-url.service.js";
+import {
+  enqueueImmediateCheck,
+  scheduleMonitor,
+  unscheduleMonitor,
+} from "../../queues/monitor-scheduler.service.js";
+import { acquireLock } from "../../lib/redis/redis.service.js";
+import { logger } from "../../config/logger.js";
+import crypto from "node:crypto";
+import { env } from "../../config/env.js";
+import { publishDomainEvent } from "../../lib/redis/redis.service.js";
 
 const ensureOwned = async (userId: string, monitorId: string) => {
   if (!Types.ObjectId.isValid(monitorId) || !/^[a-f\d]{24}$/i.test(monitorId)) {
@@ -87,7 +98,21 @@ export const createMonitor = async (
       sanitized[field] = input[field];
     }
   }
-  return Monitor.create({ ...sanitized, userId });
+  const monitor = await Monitor.create({ ...sanitized, userId });
+
+  if (monitor.active) {
+    try {
+      await scheduleMonitor(monitor);
+      await enqueueImmediateCheck(String(monitor._id));
+    } catch (error) {
+      logger.warn(
+        { monitorId: monitor._id, err: error },
+        "Failed to schedule check on create; will be repaired by reconciliation",
+      );
+    }
+  }
+
+  return monitor;
 };
 
 export const getMonitor = (userId: string, monitorId: string) => ensureOwned(userId, monitorId);
@@ -97,7 +122,7 @@ export const updateMonitor = async (
   monitorId: string,
   input: { url?: string; version?: number; [key: string]: unknown },
 ) => {
-  await ensureOwned(userId, monitorId);
+  const previous = await ensureOwned(userId, monitorId);
   await validateUrlIfPresent(input.url);
 
   const allowedFields = [
@@ -123,7 +148,7 @@ export const updateMonitor = async (
 
   const monitor = await Monitor.findOneAndUpdate(
     query,
-    { $set: updateData, $inc: { __v: 1 } },
+    { $set: updateData, $inc: { __v: 1, configRevision: 1 } },
     { new: true, runValidators: true },
   );
 
@@ -137,6 +162,23 @@ export const updateMonitor = async (
     }
     throw createApiError("Monitor not found.", 404, "MONITOR_NOT_FOUND");
   }
+
+  try {
+    if (monitor.active) {
+      await scheduleMonitor(monitor);
+      if (!previous.active) {
+        await enqueueImmediateCheck(String(monitor._id));
+      }
+    } else if (previous.active) {
+      await unscheduleMonitor(String(monitor._id));
+    }
+  } catch (error) {
+    logger.warn(
+      { monitorId: monitor._id, err: error },
+      "Failed to update scheduler on monitor update; will be repaired by reconciliation",
+    );
+  }
+
   return monitor;
 };
 
@@ -144,4 +186,104 @@ export const deleteMonitor = async (userId: string, monitorId: string) => {
   await ensureOwned(userId, monitorId);
   const result = await Monitor.deleteOne({ _id: monitorId, userId });
   if (!result.deletedCount) throw createApiError("Monitor not found.", 404, "MONITOR_NOT_FOUND");
+
+  try {
+    await unscheduleMonitor(monitorId);
+    await MonitorCheck.deleteMany({ monitorId, userId });
+  } catch (error) {
+    logger.warn({ monitorId, err: error }, "Error cleaning up scheduler or checks after deletion");
+  }
+};
+
+export const triggerManualCheck = async (userId: string, monitorId: string) => {
+  const monitor = await ensureOwned(userId, monitorId);
+  if (!monitor.active) {
+    throw createApiError(
+      "Cannot run manual check on a paused monitor. Resume the monitor first.",
+      400,
+      "INVALID_REQUEST",
+    );
+  }
+
+  const cooldownKey = `cooldown:check-now:${monitorId}`;
+  let allowed = true;
+  try {
+    allowed = await acquireLock(cooldownKey, "1", 5000);
+  } catch {
+    allowed = true;
+  }
+
+  if (!allowed) {
+    throw createApiError(
+      "Please wait a few seconds before triggering another manual check.",
+      429,
+      "RATE_LIMITED",
+    );
+  }
+
+  const runId = crypto.randomUUID();
+  try {
+    await MonitorCheck.create({
+      monitorId: monitor._id,
+      userId: monitor.userId,
+      runId,
+      status: "queued",
+      startedAt: new Date(),
+      expiresAt: new Date(Date.now() + (env.CHECK_RETENTION_DAYS || 30) * 86400000),
+    });
+    await enqueueImmediateCheck(monitorId, true, runId);
+    await Monitor.findByIdAndUpdate(monitorId, {
+      $set: { lastCheckStatus: "queued", lastCheckId: runId },
+    });
+    await publishDomainEvent("monitor.check.queued", {
+      userId,
+      payload: { monitorId, runId, status: "queued", timestamp: new Date().toISOString() },
+    });
+
+    return {
+      status: "queued",
+      runId,
+      message: "Check queued successfully.",
+    };
+  } catch (error) {
+    await MonitorCheck.deleteOne({ monitorId, runId, status: "queued" }).catch(() => undefined);
+    logger.error({ monitorId, err: error }, "Failed to queue manual check");
+    throw createApiError(
+      "Unable to queue check. Please verify Redis is running.",
+      503,
+      "INTERNAL_ERROR",
+    );
+  }
+};
+
+export const listMonitorChecks = async (
+  userId: string,
+  monitorId: string,
+  page = 1,
+  pageSize = 20,
+  status?: string,
+) => {
+  await ensureOwned(userId, monitorId);
+
+  const filter: Record<string, unknown> = { monitorId, userId };
+  if (status) {
+    filter.status = status;
+  }
+
+  const [items, total] = await Promise.all([
+    MonitorCheck.find(filter)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * pageSize)
+      .limit(pageSize)
+      .lean(),
+    MonitorCheck.countDocuments(filter),
+  ]);
+
+  return {
+    items,
+    page,
+    pageSize,
+    total,
+    totalPages: Math.ceil(total / pageSize) || 1,
+  };
 };

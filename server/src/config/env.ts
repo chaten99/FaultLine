@@ -31,6 +31,11 @@ const environmentSchema = z.object({
   OTP_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
   OTP_MAX_SENDS_PER_HOUR: z.coerce.number().int().positive().default(5),
   PASSWORD_RESET_GRANT_TTL_SECONDS: z.coerce.number().int().positive().default(600),
+  REDIS_URL: z.string().min(1).default("redis://127.0.0.1:6379"),
+  WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(10),
+  CHECK_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+  MONITOR_QUEUE_NAME: z.string().min(1).default("faultline-monitor-checks"),
+  RECONCILIATION_INTERVAL_SECONDS: z.coerce.number().int().min(60).max(86400).default(300),
 });
 
 const parsedEnvironment = environmentSchema.safeParse(process.env);
