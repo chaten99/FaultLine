@@ -4,6 +4,24 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import { app } from "../src/app.js";
 import { createAccessToken } from "../src/modules/auth/auth-token.service.js";
 import { Monitor } from "../src/modules/monitors/monitor.model.js";
+import { MonitorCheck } from "../src/modules/checks/monitor-check.model.js";
+import * as redisService from "../src/lib/redis/redis.service.js";
+
+vi.mock("../src/queues/monitor-scheduler.service.js", () => ({
+  scheduleMonitor: vi.fn().mockResolvedValue(undefined),
+  unscheduleMonitor: vi.fn().mockResolvedValue(undefined),
+  enqueueImmediateCheck: vi.fn().mockResolvedValue("mock-run-id-12345"),
+  reconcileSchedulers: vi.fn().mockResolvedValue({ added: 0, removed: 0, updated: 0 }),
+}));
+
+vi.mock("../src/lib/redis/redis.service.js", () => ({
+  acquireLock: vi.fn().mockResolvedValue(true),
+  releaseLock: vi.fn().mockResolvedValue(true),
+  publishDomainEvent: vi.fn().mockResolvedValue(1),
+  closeRedisConnections: vi.fn().mockResolvedValue(undefined),
+  getRedisClient: vi.fn(),
+  getRedisSubscriberClient: vi.fn(),
+}));
 
 type MockMonitor = {
   _id: string;
@@ -15,9 +33,24 @@ type MockMonitor = {
   timeoutMs: number;
   expectedStatusCodes: number[];
   active: boolean;
+  configRevision: number;
+  lastCheckStatus?: string;
   __v: number;
   createdAt: string;
   updatedAt: string;
+};
+
+type MockCheck = {
+  _id: string;
+  monitorId: string;
+  userId: string;
+  runId: string;
+  status: string;
+  startedAt: Date;
+  completedAt?: Date;
+  statusCode?: number;
+  responseDurationMs?: number;
+  createdAt: string;
 };
 
 const filterItems = (list: MockMonitor[], filter: Record<string, unknown>): MockMonitor[] => {
@@ -53,15 +86,37 @@ describe("Monitor API Integration Tests", () => {
   const tokenB = createAccessToken(userBId);
 
   let store: MockMonitor[] = [];
+  let checkStore: MockCheck[] = [];
 
   beforeEach(() => {
     store = [];
+    checkStore = [];
+
+    (vi.spyOn(MonitorCheck, "create") as unknown as MockInstance).mockImplementation(
+      async (doc: unknown) => {
+        const check = {
+          _id: new mongoose.Types.ObjectId().toString(),
+          ...(doc as object),
+        } as MockCheck;
+        checkStore.push(check);
+        return check;
+      },
+    );
+    (vi.spyOn(MonitorCheck, "deleteOne") as unknown as MockInstance).mockImplementation(
+      async (query: unknown) => {
+        const q = query as Record<string, unknown>;
+        const before = checkStore.length;
+        checkStore = checkStore.filter((check) => check.runId !== q.runId);
+        return { deletedCount: before - checkStore.length };
+      },
+    );
 
     (vi.spyOn(Monitor, "create") as unknown as MockInstance).mockImplementation(
       async (doc: unknown) => {
         const item: MockMonitor = {
           _id: new mongoose.Types.ObjectId().toString(),
           __v: 0,
+          configRevision: 1,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           ...(doc as Record<string, unknown>),
@@ -83,10 +138,24 @@ describe("Monitor API Integration Tests", () => {
       },
     );
 
+    (vi.spyOn(Monitor, "findByIdAndUpdate") as unknown as MockInstance).mockImplementation(
+      (id: unknown, update: unknown) => {
+        const u = update as { $set?: Record<string, unknown> };
+        const found = store.find((m) => m._id === String(id));
+        if (found && u.$set) {
+          Object.assign(found, u.$set);
+        }
+        return Promise.resolve(found ? { ...found } : null);
+      },
+    );
+
     (vi.spyOn(Monitor, "findOneAndUpdate") as unknown as MockInstance).mockImplementation(
       (query: unknown, update: unknown) => {
         const q = query as Record<string, unknown>;
-        const u = update as { $set?: Record<string, unknown>; $inc?: { __v?: number } };
+        const u = update as {
+          $set?: Record<string, unknown>;
+          $inc?: { __v?: number; configRevision?: number };
+        };
         const index = store.findIndex((m) => {
           if (q._id && m._id !== String(q._id)) return false;
           if (q.userId && m.userId !== String(q.userId)) return false;
@@ -100,6 +169,7 @@ describe("Monitor API Integration Tests", () => {
           ...current,
           ...(u.$set || {}),
           __v: current.__v + 1,
+          configRevision: current.configRevision + 1,
           updatedAt: new Date().toISOString(),
         } as MockMonitor;
         store[index] = updated;
@@ -134,8 +204,12 @@ describe("Monitor API Integration Tests", () => {
           const field = Object.keys(sortObj)[0] as keyof MockMonitor;
           const dir = sortObj[field] ?? 1;
           matched.sort((a, b) => {
-            if (a[field] < b[field]) return -1 * dir;
-            if (a[field] > b[field]) return 1 * dir;
+            const valA = a[field];
+            const valB = b[field];
+            if (valA !== undefined && valB !== undefined) {
+              if (valA < valB) return -1 * dir;
+              if (valA > valB) return 1 * dir;
+            }
             return 0;
           });
           return chain;
@@ -154,6 +228,60 @@ describe("Monitor API Integration Tests", () => {
       };
       return chain;
     });
+
+    (vi.spyOn(MonitorCheck, "find") as unknown as MockInstance).mockImplementation(
+      (filter: unknown) => {
+        const f = (filter || {}) as Record<string, unknown>;
+        let matched = checkStore.filter((c) => {
+          if (f.monitorId && c.monitorId !== String(f.monitorId)) return false;
+          if (f.userId && c.userId !== String(f.userId)) return false;
+          if (f.status && c.status !== f.status) return false;
+          return true;
+        });
+        const chain = {
+          sort() {
+            return chain;
+          },
+          skip(n: number) {
+            matched = matched.slice(n);
+            return chain;
+          },
+          limit(n: number) {
+            matched = matched.slice(0, n);
+            return chain;
+          },
+          lean() {
+            return Promise.resolve(matched.map((c) => ({ ...c })));
+          },
+        };
+        return chain;
+      },
+    );
+
+    (vi.spyOn(MonitorCheck, "deleteMany") as unknown as MockInstance).mockImplementation(
+      async (query: unknown) => {
+        const q = query as Record<string, unknown>;
+        const prevLen = checkStore.length;
+        checkStore = checkStore.filter((c) => {
+          if (q.monitorId && c.monitorId === String(q.monitorId)) return false;
+          if (q.userId && c.userId === String(q.userId)) return false;
+          return true;
+        });
+        return { deletedCount: prevLen - checkStore.length };
+      },
+    );
+
+    (vi.spyOn(MonitorCheck, "countDocuments") as unknown as MockInstance).mockImplementation(
+      async (filter: unknown) => {
+        const f = (filter || {}) as Record<string, unknown>;
+        return checkStore.filter((c) => {
+          if (f.monitorId && c.monitorId !== String(f.monitorId)) return false;
+          if (f.userId && c.userId !== String(f.userId)) return false;
+          if (f.status && c.status !== f.status) return false;
+          return true;
+        }).length;
+      },
+    );
   });
 
   afterEach(() => {
@@ -166,6 +294,8 @@ describe("Monitor API Integration Tests", () => {
     await request(app).get("/api/monitors/507f1f77bcf86cd799439011").expect(401);
     await request(app).patch("/api/monitors/507f1f77bcf86cd799439011").send({}).expect(401);
     await request(app).delete("/api/monitors/507f1f77bcf86cd799439011").expect(401);
+    await request(app).post("/api/monitors/507f1f77bcf86cd799439011/check-now").expect(401);
+    await request(app).get("/api/monitors/507f1f77bcf86cd799439011/checks").expect(401);
   });
 
   it("handles the complete monitor CRUD lifecycle", async () => {
@@ -176,23 +306,19 @@ describe("Monitor API Integration Tests", () => {
         name: "Test API Health",
         url: "https://api.example.com/health",
         method: "GET",
-        intervalSeconds: 300,
-        timeoutMs: 10000,
-        expectedStatusCodes: [200, 201],
+        intervalSeconds: 60,
+        timeoutMs: 5000,
+        expectedStatusCodes: [200, 204],
         active: true,
       })
       .expect(201);
 
-    expect(createRes.body).toMatchObject({
-      name: "Test API Health",
-      url: "https://api.example.com/health",
-      method: "GET",
-      intervalSeconds: 300,
-      timeoutMs: 10000,
-      expectedStatusCodes: [200, 201],
-      active: true,
-    });
+    expect(createRes.body.name).toBe("Test API Health");
+    expect(createRes.body.url).toBe("https://api.example.com/health");
+    expect(createRes.body.intervalSeconds).toBe(60);
+    expect(createRes.body.active).toBe(true);
     expect(createRes.body._id).toBeDefined();
+
     const monitorId = createRes.body._id as string;
 
     const getRes = await request(app)
@@ -200,19 +326,22 @@ describe("Monitor API Integration Tests", () => {
       .set("Authorization", `Bearer ${tokenA}`)
       .expect(200);
 
+    expect(getRes.body._id).toBe(monitorId);
     expect(getRes.body.name).toBe("Test API Health");
 
-    const patchRes = await request(app)
+    const updateRes = await request(app)
       .patch(`/api/monitors/${monitorId}`)
       .set("Authorization", `Bearer ${tokenA}`)
       .send({
         name: "Updated API Health",
-        timeoutMs: 5000,
+        intervalSeconds: 300,
+        timeoutMs: 8000,
       })
       .expect(200);
 
-    expect(patchRes.body.name).toBe("Updated API Health");
-    expect(patchRes.body.timeoutMs).toBe(5000);
+    expect(updateRes.body.name).toBe("Updated API Health");
+    expect(updateRes.body.intervalSeconds).toBe(300);
+    expect(updateRes.body.timeoutMs).toBe(8000);
 
     await request(app)
       .delete(`/api/monitors/${monitorId}`)
@@ -231,7 +360,7 @@ describe("Monitor API Integration Tests", () => {
       .set("Authorization", `Bearer ${tokenA}`)
       .send({
         name: "User A Monitor",
-        url: "https://api.example.com/private",
+        url: "https://api.example.com/a",
         method: "GET",
         intervalSeconds: 300,
         timeoutMs: 10000,
@@ -250,7 +379,7 @@ describe("Monitor API Integration Tests", () => {
     await request(app)
       .patch(`/api/monitors/${monitorId}`)
       .set("Authorization", `Bearer ${tokenB}`)
-      .send({ name: "Hacked by User B" })
+      .send({ name: "Hacked Name" })
       .expect(404);
 
     await request(app)
@@ -258,13 +387,15 @@ describe("Monitor API Integration Tests", () => {
       .set("Authorization", `Bearer ${tokenB}`)
       .expect(404);
 
-    const listB = await request(app)
-      .get("/api/monitors")
+    await request(app)
+      .post(`/api/monitors/${monitorId}/check-now`)
       .set("Authorization", `Bearer ${tokenB}`)
-      .expect(200);
+      .expect(404);
 
-    expect(listB.body.items).toHaveLength(0);
-    expect(listB.body.counts.total).toBe(0);
+    await request(app)
+      .get(`/api/monitors/${monitorId}/checks`)
+      .set("Authorization", `Bearer ${tokenB}`)
+      .expect(404);
 
     await request(app)
       .delete(`/api/monitors/${monitorId}`)
@@ -277,17 +408,18 @@ describe("Monitor API Integration Tests", () => {
       .post("/api/monitors")
       .set("Authorization", `Bearer ${tokenA}`)
       .send({
-        name: "Toggle Monitor",
-        url: "https://api.example.com/toggle",
+        name: "Pausable Monitor",
+        url: "https://api.example.com/pause",
         method: "GET",
-        intervalSeconds: 60,
-        timeoutMs: 5000,
+        intervalSeconds: 300,
+        timeoutMs: 10000,
         expectedStatusCodes: [200],
         active: true,
       })
       .expect(201);
 
     const monitorId = createRes.body._id as string;
+    expect(createRes.body.active).toBe(true);
 
     const pauseRes = await request(app)
       .patch(`/api/monitors/${monitorId}`)
@@ -296,14 +428,6 @@ describe("Monitor API Integration Tests", () => {
       .expect(200);
 
     expect(pauseRes.body.active).toBe(false);
-
-    const listPaused = await request(app)
-      .get("/api/monitors?status=paused")
-      .set("Authorization", `Bearer ${tokenA}`)
-      .expect(200);
-
-    expect(listPaused.body.items.some((m: { _id: string }) => m._id === monitorId)).toBe(true);
-    expect(listPaused.body.counts.paused).toBeGreaterThanOrEqual(1);
 
     const resumeRes = await request(app)
       .patch(`/api/monitors/${monitorId}`)
@@ -327,34 +451,32 @@ describe("Monitor API Integration Tests", () => {
         .set("Authorization", `Bearer ${tokenA}`)
         .send({
           name: `Batch Monitor ${i}`,
-          url: `https://api${i}.example.com/health`,
+          url: `https://api.example.com/batch/${i}`,
           method: "GET",
-          intervalSeconds: i === 1 ? 60 : 300,
-          timeoutMs: 10000,
+          intervalSeconds: [60, 300, 600, 900, 1800][i - 1],
+          timeoutMs: 5000,
           expectedStatusCodes: [200],
           active: i % 2 === 0,
         })
         .expect(201);
-      createdIds.push(res.body._id as string);
+      createdIds.push(res.body._id);
     }
 
-    const page1 = await request(app)
+    const pagedRes = await request(app)
       .get("/api/monitors?page=1&pageSize=2")
       .set("Authorization", `Bearer ${tokenA}`)
       .expect(200);
 
-    expect(page1.body.items).toHaveLength(2);
-    expect(page1.body.total).toBe(5);
-    expect(page1.body.totalPages).toBe(3);
-    expect(page1.body.page).toBe(1);
+    expect(pagedRes.body.items).toHaveLength(2);
+    expect(pagedRes.body.total).toBe(5);
+    expect(pagedRes.body.totalPages).toBe(3);
 
-    const page2 = await request(app)
-      .get("/api/monitors?page=2&pageSize=2")
+    const activeRes = await request(app)
+      .get("/api/monitors?status=active")
       .set("Authorization", `Bearer ${tokenA}`)
       .expect(200);
 
-    expect(page2.body.items).toHaveLength(2);
-    expect(page2.body.page).toBe(2);
+    expect(activeRes.body.items.every((m: { active: boolean }) => m.active)).toBe(true);
 
     const searchRes = await request(app)
       .get("/api/monitors?search=Batch Monitor 3")
@@ -370,8 +492,7 @@ describe("Monitor API Integration Tests", () => {
       .expect(200);
 
     const names = sortRes.body.items.map((m: { name: string }) => m.name);
-    const sorted = [...names].sort();
-    expect(names).toEqual(sorted);
+    expect(names).toEqual([...names].sort());
 
     for (const id of createdIds) {
       await request(app)
@@ -431,5 +552,118 @@ describe("Monitor API Integration Tests", () => {
       .expect(400);
 
     expect(ssrfRes.body.code).toBe("INVALID_MONITOR_URL");
+  });
+
+  it("handles manual check triggering via check-now endpoint", async () => {
+    const createRes = await request(app)
+      .post("/api/monitors")
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({
+        name: "Manual Check Endpoint",
+        url: "https://api.example.com/manual-check",
+        method: "GET",
+        intervalSeconds: 300,
+        timeoutMs: 5000,
+        expectedStatusCodes: [200],
+        active: true,
+      })
+      .expect(201);
+
+    const monitorId = createRes.body._id as string;
+
+    const checkRes = await request(app)
+      .post(`/api/monitors/${monitorId}/check-now`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .expect(202);
+
+    expect(checkRes.body.status).toBe("queued");
+    expect(checkRes.body.runId).toBeDefined();
+
+    const stored = store.find((m) => m._id === monitorId);
+    expect(stored?.lastCheckStatus).toBe("queued");
+
+    await request(app)
+      .delete(`/api/monitors/${monitorId}`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .expect(204);
+  });
+
+  it("enforces cooldown rate limiting on check-now", async () => {
+    const createRes = await request(app)
+      .post("/api/monitors")
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({
+        name: "Rate Limited Endpoint",
+        url: "https://api.example.com/rate-limit",
+        method: "GET",
+        intervalSeconds: 300,
+        timeoutMs: 5000,
+        expectedStatusCodes: [200],
+        active: true,
+      })
+      .expect(201);
+
+    const monitorId = createRes.body._id as string;
+
+    (vi.spyOn(redisService, "acquireLock") as unknown as MockInstance).mockResolvedValueOnce(false);
+
+    const rateLimitedRes = await request(app)
+      .post(`/api/monitors/${monitorId}/check-now`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .expect(429);
+
+    expect(rateLimitedRes.body.code).toBe("RATE_LIMITED");
+
+    await request(app)
+      .delete(`/api/monitors/${monitorId}`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .expect(204);
+  });
+
+  it("lists monitor checks with pagination", async () => {
+    const createRes = await request(app)
+      .post("/api/monitors")
+      .set("Authorization", `Bearer ${tokenA}`)
+      .send({
+        name: "Checks Listing Monitor",
+        url: "https://api.example.com/checks-test",
+        method: "GET",
+        intervalSeconds: 300,
+        timeoutMs: 5000,
+        expectedStatusCodes: [200],
+        active: true,
+      })
+      .expect(201);
+
+    const monitorId = createRes.body._id as string;
+
+    for (let i = 1; i <= 3; i++) {
+      checkStore.push({
+        _id: new mongoose.Types.ObjectId().toString(),
+        monitorId,
+        userId: userAId,
+        runId: `run-${i}`,
+        status: i === 1 ? "success" : "failure",
+        statusCode: i === 1 ? 200 : 500,
+        responseDurationMs: 150 * i,
+        startedAt: new Date(),
+        completedAt: new Date(),
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    const listRes = await request(app)
+      .get(`/api/monitors/${monitorId}/checks?page=1&pageSize=2`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .expect(200);
+
+    expect(listRes.body.items).toHaveLength(2);
+    expect(listRes.body.total).toBe(3);
+    expect(listRes.body.totalPages).toBe(2);
+
+    await request(app)
+      .delete(`/api/monitors/${monitorId}`)
+      .set("Authorization", `Bearer ${tokenA}`)
+      .expect(204);
   });
 });

@@ -22,7 +22,9 @@ export type ApiErrorCode =
   | "CREDENTIALS_PROHIBITED"
   | "RESPONSE_TOO_LARGE"
   | "PROBE_TIMEOUT"
-  | "TOO_MANY_REDIRECTS";
+  | "TOO_MANY_REDIRECTS"
+  | "PORT_NOT_PERMITTED"
+  | "RATE_LIMITED";
 
 export type ApiError = Error & {
   statusCode: number;

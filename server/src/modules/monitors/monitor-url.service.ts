@@ -101,10 +101,10 @@ export const validateMonitorUrl = async (value: string) => {
     }
   } catch (error) {
     if (
-      error instanceof Error &&
+      error &&
+      typeof error === "object" &&
       "code" in error &&
-      error.code !== "ENOTFOUND" &&
-      error.code !== "EAI_AGAIN"
+      error.code === "INVALID_MONITOR_URL"
     ) {
       throw error;
     }

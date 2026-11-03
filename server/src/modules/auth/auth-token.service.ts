@@ -38,5 +38,10 @@ const verify = (token: string, secret: string, audience: string, use: string): T
 
 export const verifyAccessToken = (token: string): string =>
   verify(token, env.JWT_ACCESS_SECRET, env.JWT_ACCESS_AUDIENCE, "access").sub as string;
+export const getAccessTokenExpiry = (token: string): number => {
+  const expiry = verify(token, env.JWT_ACCESS_SECRET, env.JWT_ACCESS_AUDIENCE, "access").exp;
+  if (typeof expiry !== "number") throw new Error("Invalid access token expiry");
+  return expiry;
+};
 export const verifyRefreshToken = (token: string): TokenClaims =>
   verify(token, env.JWT_REFRESH_SECRET, env.JWT_REFRESH_AUDIENCE, "refresh");

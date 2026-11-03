@@ -17,6 +17,17 @@ const monitorSchema = new Schema(
       validate: (value: number[]) => value.length > 0,
     },
     active: { type: Boolean, required: true, default: true },
+    configRevision: { type: Number, required: true, default: 1 },
+    lastCheckAt: { type: Date },
+    lastCheckStatus: {
+      type: String,
+      enum: ["queued", "running", "success", "failure", "timeout", "error"],
+    },
+    lastStatusCode: { type: Number },
+    lastResponseDurationMs: { type: Number },
+    lastCheckId: { type: String },
+    lastFailureCategory: { type: String, maxlength: 50 },
+    lastErrorMessage: { type: String, maxlength: 500 },
   },
   { timestamps: true },
 );
