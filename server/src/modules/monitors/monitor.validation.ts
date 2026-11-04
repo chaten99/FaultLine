@@ -16,6 +16,8 @@ export const createMonitorSchema = z
     timeoutMs: z.number().int().min(1000).max(30000),
     expectedStatusCodes: statusCodes,
     active: z.boolean().default(true),
+    failureThreshold: z.number().int().min(1).max(10).default(3),
+    recoveryThreshold: z.number().int().min(1).max(10).default(2),
   })
   .strict();
 
@@ -32,6 +34,8 @@ export const updateMonitorSchema = z
     timeoutMs: z.number().int().min(1000).max(30000).optional(),
     expectedStatusCodes: statusCodes.optional(),
     active: z.boolean().optional(),
+    failureThreshold: z.number().int().min(1).max(10).optional(),
+    recoveryThreshold: z.number().int().min(1).max(10).optional(),
     version: z.number().int().nonnegative().optional(),
   })
   .strict()

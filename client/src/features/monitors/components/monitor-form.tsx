@@ -68,6 +68,8 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
     expectedStatusCodes: initialData?.expectedStatusCodes
       ? formatStatusCodes(initialData.expectedStatusCodes)
       : "200",
+    failureThreshold: initialData?.failureThreshold ?? 3,
+    recoveryThreshold: initialData?.recoveryThreshold ?? 2,
     active: initialData?.active ?? true,
   };
 
@@ -99,6 +101,8 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
         intervalSeconds: Number(values.intervalSeconds),
         timeoutMs: Number(values.timeoutMs),
         expectedStatusCodes: parseStatusCodes(values.expectedStatusCodes),
+        failureThreshold: Number(values.failureThreshold),
+        recoveryThreshold: Number(values.recoveryThreshold),
         active: Boolean(values.active),
       };
       await onSubmit(payload);
@@ -409,6 +413,89 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
                 {errors.expectedStatusCodes.message}
               </p>
             )}
+          </div>
+
+          <div className="space-y-4 pt-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Incident thresholds
+            </h3>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="monitor-failure-threshold">Failure threshold</Label>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        className="inline-flex text-muted-foreground hover:text-foreground focus:outline-none"
+                        aria-label="Failure threshold guidance"
+                      >
+                        <HelpCircle className="size-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs text-xs">
+                      Number of consecutive check failures required before opening an incident
+                      (1–10).
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <Input
+                  id="monitor-failure-threshold"
+                  type="number"
+                  min={1}
+                  max={10}
+                  disabled={isSubmitting}
+                  aria-invalid={Boolean(errors.failureThreshold)}
+                  aria-describedby={
+                    errors.failureThreshold ? "monitor-failure-threshold-error" : undefined
+                  }
+                  {...register("failureThreshold", { valueAsNumber: true })}
+                />
+                {errors.failureThreshold && (
+                  <p id="monitor-failure-threshold-error" className="text-xs text-destructive">
+                    {errors.failureThreshold.message}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="monitor-recovery-threshold">Recovery threshold</Label>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        className="inline-flex text-muted-foreground hover:text-foreground focus:outline-none"
+                        aria-label="Recovery threshold guidance"
+                      >
+                        <HelpCircle className="size-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs text-xs">
+                      Number of consecutive successful checks required to automatically resolve an
+                      active incident (1–10).
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <Input
+                  id="monitor-recovery-threshold"
+                  type="number"
+                  min={1}
+                  max={10}
+                  disabled={isSubmitting}
+                  aria-invalid={Boolean(errors.recoveryThreshold)}
+                  aria-describedby={
+                    errors.recoveryThreshold ? "monitor-recovery-threshold-error" : undefined
+                  }
+                  {...register("recoveryThreshold", { valueAsNumber: true })}
+                />
+                {errors.recoveryThreshold && (
+                  <p id="monitor-recovery-threshold-error" className="text-xs text-destructive">
+                    {errors.recoveryThreshold.message}
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
         </div>
 

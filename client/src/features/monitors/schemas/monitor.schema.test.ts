@@ -15,6 +15,8 @@ describe("monitor schema and helpers", () => {
       intervalSeconds: 300,
       timeoutMs: 5000,
       expectedStatusCodes: "200, 201",
+      failureThreshold: 3,
+      recoveryThreshold: 2,
       active: true,
     };
     const result = monitorFormSchema.safeParse(valid);
@@ -29,6 +31,8 @@ describe("monitor schema and helpers", () => {
       intervalSeconds: 300,
       timeoutMs: 5000,
       expectedStatusCodes: "200",
+      failureThreshold: 3,
+      recoveryThreshold: 2,
       active: true,
     };
     const result = monitorFormSchema.safeParse(invalid);
@@ -43,6 +47,8 @@ describe("monitor schema and helpers", () => {
       intervalSeconds: 300,
       timeoutMs: 500,
       expectedStatusCodes: "200",
+      failureThreshold: 3,
+      recoveryThreshold: 2,
       active: true,
     };
     expect(monitorFormSchema.safeParse(tooLow).success).toBe(false);
@@ -62,6 +68,8 @@ describe("monitor schema and helpers", () => {
       intervalSeconds: 300,
       timeoutMs: 5000,
       expectedStatusCodes: "not-a-number, 999",
+      failureThreshold: 3,
+      recoveryThreshold: 2,
       active: true,
     };
     expect(monitorFormSchema.safeParse(invalidCodes).success).toBe(false);
@@ -76,6 +84,33 @@ describe("monitor schema and helpers", () => {
 
   it("formats status codes correctly", () => {
     expect(formatStatusCodes([200, 201])).toBe("200, 201");
+  });
+
+  it("validates incident thresholds within range and rejects out of range", () => {
+    const validWithThresholds = {
+      name: "API Health",
+      url: "https://api.example.com/health",
+      method: "GET",
+      intervalSeconds: 300,
+      timeoutMs: 5000,
+      expectedStatusCodes: "200",
+      failureThreshold: 5,
+      recoveryThreshold: 3,
+      active: true,
+    };
+    expect(monitorFormSchema.safeParse(validWithThresholds).success).toBe(true);
+
+    const invalidFailureThreshold = {
+      ...validWithThresholds,
+      failureThreshold: 11,
+    };
+    expect(monitorFormSchema.safeParse(invalidFailureThreshold).success).toBe(false);
+
+    const invalidRecoveryThreshold = {
+      ...validWithThresholds,
+      recoveryThreshold: 0,
+    };
+    expect(monitorFormSchema.safeParse(invalidRecoveryThreshold).success).toBe(false);
   });
 
   it("formats intervals correctly", () => {

@@ -92,9 +92,20 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           >
             Monitors
           </NavLink>
-          <div className="flex items-center justify-between px-3 py-2.5 text-sm text-muted-foreground">
-            Incidents <span className="text-[10px] uppercase tracking-wide">Soon</span>
-          </div>
+          <NavLink
+            to="/incidents"
+            onClick={() => setOpen(false)}
+            className={({ isActive }) =>
+              cn(
+                "block rounded-md px-3 py-2.5 text-sm font-medium transition-all duration-150",
+                isActive
+                  ? "bg-accent text-accent-foreground shadow-xs"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+              )
+            }
+          >
+            Incidents
+          </NavLink>
         </nav>
 
         <AlertDialog>

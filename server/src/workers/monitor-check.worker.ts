@@ -11,6 +11,7 @@ import {
 import { Monitor } from "../modules/monitors/monitor.model.js";
 import { MonitorCheck, type CheckStatus } from "../modules/checks/monitor-check.model.js";
 import { executeMonitorHttpCheck } from "../modules/monitors/monitor-executor.service.js";
+import { evaluateCheckForIncident } from "../modules/incidents/incident.service.js";
 import type { MonitorCheckJobData } from "../queues/monitor-check.queue.js";
 
 export const processMonitorCheckJob = async (job: Job<MonitorCheckJobData>): Promise<void> => {
@@ -162,6 +163,22 @@ export const processMonitorCheckJob = async (job: Job<MonitorCheckJobData>): Pro
         },
       },
     );
+
+    try {
+      await evaluateCheckForIncident(String(monitor._id), {
+        runId,
+        success: outcome.success,
+        statusCode: outcome.statusCode,
+        failureCategory: outcome.failureCategory,
+        errorMessage: outcome.errorMessage,
+        completedAt,
+      });
+    } catch (incidentErr) {
+      logger.error(
+        { monitorId, err: incidentErr },
+        "Error evaluating check for incident management",
+      );
+    }
   } catch (error) {
     logger.error({ monitorId, err: error }, "Unhandled error during monitor check processing");
     throw error;

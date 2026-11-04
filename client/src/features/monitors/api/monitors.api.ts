@@ -17,6 +17,9 @@ export type Monitor = {
   lastCheckId?: string;
   lastFailureCategory?: string;
   lastErrorMessage?: string;
+  failureThreshold?: number;
+  recoveryThreshold?: number;
+  activeIncidentId?: string | null;
   createdAt: string;
   updatedAt: string;
 };

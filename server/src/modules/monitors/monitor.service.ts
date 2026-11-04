@@ -91,6 +91,8 @@ export const createMonitor = async (
     "timeoutMs",
     "expectedStatusCodes",
     "active",
+    "failureThreshold",
+    "recoveryThreshold",
   ];
   const sanitized: Record<string, unknown> = {};
   for (const field of allowedFields) {
@@ -133,6 +135,8 @@ export const updateMonitor = async (
     "timeoutMs",
     "expectedStatusCodes",
     "active",
+    "failureThreshold",
+    "recoveryThreshold",
   ];
   const updateData: Record<string, unknown> = {};
   for (const field of allowedFields) {

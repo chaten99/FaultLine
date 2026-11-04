@@ -47,7 +47,7 @@ export const startMonitorRealtime = async (httpServer: HttpServer) => {
         !event.type ||
         !event.userId ||
         !event.payload ||
-        !event.type.startsWith("monitor.check.")
+        !(event.type.startsWith("monitor.check.") || event.type.startsWith("incident."))
       )
         return;
       io.to(`user:${event.userId}`).emit(event.type, event.payload);

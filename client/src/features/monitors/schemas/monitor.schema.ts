@@ -53,6 +53,16 @@ export const monitorFormSchema = z.object({
         return Number.isInteger(num) && num >= 100 && num <= 599;
       });
     }, "Must be valid HTTP status codes (100–599) separated by commas"),
+  failureThreshold: z
+    .number()
+    .int()
+    .min(1, "Failure threshold must be at least 1")
+    .max(10, "Failure threshold cannot exceed 10"),
+  recoveryThreshold: z
+    .number()
+    .int()
+    .min(1, "Recovery threshold must be at least 1")
+    .max(10, "Recovery threshold cannot exceed 10"),
   active: z.boolean(),
 });
 
