@@ -106,3 +106,6 @@ export const triggerCheckNow = (id: string) =>
 
 export const getMonitorChecks = (id: string, params?: ListChecksParams) =>
   apiClient.get<CheckList>(`/monitors/${id}/checks`, { params });
+
+export const getMonitorCheck = (id: string, checkId: string) =>
+  apiClient.get<MonitorCheck>(`/monitors/${id}/checks/${checkId}`);

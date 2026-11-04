@@ -38,7 +38,7 @@ export function AddMonitorDialog({ open, onOpenChange, onCreate }: AddMonitorDia
       }}
     >
       <DialogContent
-        className="max-h-[90vh] overflow-y-auto sm:max-w-lg"
+        className="max-h-[90vh] overflow-y-auto sm:max-w-xl"
         onEscapeKeyDown={(e) => {
           if (submitting) e.preventDefault();
         }}
@@ -49,7 +49,8 @@ export function AddMonitorDialog({ open, onOpenChange, onCreate }: AddMonitorDia
         <DialogHeader>
           <DialogTitle>Add monitor</DialogTitle>
           <DialogDescription>
-            Configure an API endpoint to manage it in FaultLine.
+            Keep an eye on your API endpoint. FaultLine will automatically check it and notify you
+            when something goes wrong.
           </DialogDescription>
         </DialogHeader>
 

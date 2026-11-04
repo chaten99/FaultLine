@@ -291,3 +291,16 @@ export const listMonitorChecks = async (
     totalPages: Math.ceil(total / pageSize) || 1,
   };
 };
+
+export const getMonitorCheck = async (userId: string, monitorId: string, checkId: string) => {
+  await ensureOwned(userId, monitorId);
+  const query = Types.ObjectId.isValid(checkId)
+    ? { $or: [{ _id: checkId }, { runId: checkId }], monitorId, userId }
+    : { runId: checkId, monitorId, userId };
+
+  const check = await MonitorCheck.findOne(query).lean();
+  if (!check) {
+    throw createApiError("Check not found.", 404, "CHECK_NOT_FOUND");
+  }
+  return check;
+};

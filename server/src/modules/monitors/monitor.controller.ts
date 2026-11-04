@@ -12,6 +12,7 @@ import {
   createMonitor,
   deleteMonitor,
   getMonitor,
+  getMonitorCheck,
   listMonitorChecks,
   listMonitors,
   triggerManualCheck,
@@ -74,4 +75,11 @@ export const listChecks = async (request: Request, response: Response) => {
   return response.json(
     await listMonitorChecks(userId(request), id, query.page, query.pageSize, query.status),
   );
+};
+
+export const getCheck = async (request: Request, response: Response) => {
+  const { id } = monitorIdSchema.parse(request.params);
+  const { checkId } = request.params;
+  const check = await getMonitorCheck(userId(request), id, checkId);
+  return response.json(check);
 };
