@@ -39,7 +39,9 @@ import { Spinner, SpinnerCustom } from "@/components/common/loading-spinner";
 import { EditMonitorDialog } from "../components/edit-monitor-dialog";
 import { DeleteMonitorDialog } from "../components/delete-monitor-dialog";
 import { MonitorStatusBadge } from "../components/monitor-status-badge";
+import { CheckDetailsSheet } from "../components/check-details-sheet";
 import { formatRelativeTime } from "../lib/monitor-status";
+import { presentCheck } from "../lib/check-presentation";
 import {
   deleteMonitor,
   getMonitor,
@@ -53,6 +55,7 @@ import {
 import { formatInterval, formatStatusCodes } from "../schemas/monitor.schema";
 import { getApiErrorMessage } from "@/lib/api-error";
 import { useMonitorSocket } from "../realtime/use-monitor-socket";
+import { cn } from "@/lib/utils";
 
 export function MonitorDetailsPage() {
   const { id } = useParams<{ id: string }>();
@@ -62,6 +65,8 @@ export function MonitorDetailsPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [checkPage, setCheckPage] = useState(1);
+  const [selectedCheck, setSelectedCheck] = useState<MonitorCheck | null>(null);
+  const [checkDetailsOpen, setCheckDetailsOpen] = useState(false);
   useMonitorSocket(id);
 
   const {
@@ -555,62 +560,89 @@ export function MonitorDetailsPage() {
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
-                      <TableHead className="w-[18%]">Status</TableHead>
-                      <TableHead className="w-[16%]">HTTP Code</TableHead>
-                      <TableHead className="w-[18%]">Response Time</TableHead>
-                      <TableHead className="w-[28%]">Failure / Error</TableHead>
-                      <TableHead className="w-[20%] text-right">Executed</TableHead>
+                      <TableHead className="w-[12%]">Result</TableHead>
+                      <TableHead className="w-[14%]">HTTP response</TableHead>
+                      <TableHead className="w-[12%]">Duration</TableHead>
+                      <TableHead className="w-[38%]">What happened</TableHead>
+                      <TableHead className="w-[14%]">Executed</TableHead>
+                      <TableHead className="w-[10%] text-right">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {checksData.items.map((check) => (
-                      <TableRow key={check._id}>
-                        <TableCell>{renderCheckStatusBadge(check)}</TableCell>
+                    {checksData.items.map((check) => {
+                      const presentation = presentCheck(check, monitor);
+                      return (
+                        <TableRow
+                          key={check._id}
+                          className="cursor-pointer transition-colors hover:bg-muted/50"
+                          onClick={() => {
+                            setSelectedCheck(check);
+                            setCheckDetailsOpen(true);
+                          }}
+                        >
+                          <TableCell>{renderCheckStatusBadge(check)}</TableCell>
 
-                        <TableCell>
-                          {typeof check.statusCode === "number" ? (
-                            <span className="font-mono text-xs text-foreground">
-                              {check.statusCode}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
+                          <TableCell>
+                            {typeof check.statusCode === "number" ? (
+                              <span className="font-mono text-xs text-foreground">
+                                {check.statusCode}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
 
-                        <TableCell>
-                          {typeof check.responseDurationMs === "number" ? (
-                            <span className="font-mono text-xs text-foreground">
-                              {check.responseDurationMs}ms
-                            </span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
+                          <TableCell>
+                            {typeof check.responseDurationMs === "number" ? (
+                              <span className="font-mono text-xs text-foreground">
+                                {check.responseDurationMs}ms
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
 
-                        <TableCell>
-                          {check.errorMessage ? (
+                          <TableCell>
                             <span
-                              className="block max-w-sm truncate text-xs text-destructive"
-                              title={check.errorMessage}
+                              className={cn(
+                                "block max-w-md truncate text-xs",
+                                check.status === "failure" ||
+                                  check.status === "error" ||
+                                  check.status === "timeout"
+                                  ? "font-medium text-destructive"
+                                  : "text-foreground",
+                              )}
+                              title={presentation.detailedExplanation}
                             >
-                              {check.failureCategory ? `[${check.failureCategory}] ` : ""}
-                              {check.errorMessage}
+                              {presentation.summary}
                             </span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
+                          </TableCell>
 
-                        <TableCell className="text-right">
-                          <span
-                            className="text-xs text-muted-foreground"
-                            title={formatDateTime(check.startedAt)}
-                          >
-                            {formatRelativeTime(check.startedAt)}
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                          <TableCell>
+                            <span
+                              className="text-xs text-muted-foreground"
+                              title={formatDateTime(check.startedAt)}
+                            >
+                              {formatRelativeTime(check.startedAt)}
+                            </span>
+                          </TableCell>
+
+                          <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                              onClick={() => {
+                                setSelectedCheck(check);
+                                setCheckDetailsOpen(true);
+                              }}
+                            >
+                              View details
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
@@ -666,6 +698,13 @@ export function MonitorDetailsPage() {
         onConfirmDelete={async () => {
           await deleteMutation.mutateAsync();
         }}
+      />
+
+      <CheckDetailsSheet
+        check={selectedCheck}
+        monitor={monitor}
+        open={checkDetailsOpen}
+        onOpenChange={setCheckDetailsOpen}
       />
     </DashboardLayout>
   );

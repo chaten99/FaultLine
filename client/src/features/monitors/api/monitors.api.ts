@@ -17,6 +17,9 @@ export type Monitor = {
   lastCheckId?: string;
   lastFailureCategory?: string;
   lastErrorMessage?: string;
+  failureThreshold?: number;
+  recoveryThreshold?: number;
+  activeIncidentId?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -103,3 +106,6 @@ export const triggerCheckNow = (id: string) =>
 
 export const getMonitorChecks = (id: string, params?: ListChecksParams) =>
   apiClient.get<CheckList>(`/monitors/${id}/checks`, { params });
+
+export const getMonitorCheck = (id: string, checkId: string) =>
+  apiClient.get<MonitorCheck>(`/monitors/${id}/checks/${checkId}`);

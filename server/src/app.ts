@@ -8,6 +8,7 @@ import { healthRouter } from "./modules/health/health.routes.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { monitorRouter } from "./modules/monitors/monitor.routes.js";
+import { incidentRouter } from "./modules/incidents/incident.routes.js";
 
 export const app = express();
 app.use(helmet());
@@ -29,6 +30,7 @@ app.use(requestLogger);
 app.use("/api", healthRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/monitors", monitorRouter);
+app.use("/api/incidents", incidentRouter);
 app.use((_request, response) => {
   response.status(404).json({ status: "error", message: "Route not found" });
 });

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import axios from "axios";
-import { Globe, HelpCircle } from "lucide-react";
+import { ChevronDown, Globe, HelpCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,9 +14,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Switch } from "@/components/ui/switch";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { SpinnerCustom } from "@/components/common/loading-spinner";
 import {
-  formatInterval,
   formatStatusCodes,
   monitorFormSchema,
   monitorIntervals,
@@ -34,30 +35,31 @@ interface MonitorFormProps {
   onCancel: () => void;
 }
 
-const intervalLabels: Record<number, string> = {
-  60: "Every 1m (60s)",
-  300: "Every 5m (Recommended)",
-  600: "Every 10m",
-  900: "Every 15m",
-  1800: "Every 30m",
+const intervalDescriptions: Record<number, string> = {
+  60: "Every 1 minute",
+  300: "Every 5 minutes (Recommended)",
+  600: "Every 10 minutes",
+  900: "Every 15 minutes",
+  1800: "Every 30 minutes",
   3600: "Every 1 hour",
 };
 
 const timeoutPresets = [
-  { label: "5s", value: 5000 },
-  { label: "10s", value: 10000 },
-  { label: "15s", value: 15000 },
-  { label: "30s", value: 30000 },
+  { label: "5 seconds", seconds: 5, ms: 5000 },
+  { label: "10 seconds", seconds: 10, ms: 10000 },
+  { label: "15 seconds", seconds: 15, ms: 15000 },
+  { label: "30 seconds", seconds: 30, ms: 30000 },
 ];
 
 const statusCodePresets = [
   { label: "200 OK", value: "200" },
-  { label: "2xx Success", value: "200, 201, 204" },
-  { label: "2xx + 3xx", value: "200, 201, 301, 302" },
+  { label: "2xx responses", value: "200, 201, 202, 204" },
+  { label: "2xx and 3xx responses", value: "200, 201, 202, 204, 301, 302, 307, 308" },
 ];
 
 export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFormProps) {
   const [apiError, setApiError] = useState<string | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(mode === "edit");
 
   const defaultValues: MonitorFormValues = {
     name: initialData?.name ?? "",
@@ -68,6 +70,8 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
     expectedStatusCodes: initialData?.expectedStatusCodes
       ? formatStatusCodes(initialData.expectedStatusCodes)
       : "200",
+    failureThreshold: initialData?.failureThreshold ?? 3,
+    recoveryThreshold: initialData?.recoveryThreshold ?? 2,
     active: initialData?.active ?? true,
   };
 
@@ -85,9 +89,11 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
   });
 
   const selectedInterval = watch("intervalSeconds");
-  const currentTimeout = watch("timeoutMs");
+  const currentTimeoutMs = watch("timeoutMs");
   const currentStatusCodes = watch("expectedStatusCodes");
   const activeChecked = watch("active");
+
+  const timeoutSeconds = Math.round((currentTimeoutMs || 10000) / 1000);
 
   const submitHandler = async (values: MonitorFormValues) => {
     setApiError(null);
@@ -99,6 +105,8 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
         intervalSeconds: Number(values.intervalSeconds),
         timeoutMs: Number(values.timeoutMs),
         expectedStatusCodes: parseStatusCodes(values.expectedStatusCodes),
+        failureThreshold: Number(values.failureThreshold),
+        recoveryThreshold: Number(values.recoveryThreshold),
         active: Boolean(values.active),
       };
       await onSubmit(payload);
@@ -138,54 +146,55 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
         </div>
       )}
 
-      <div className="space-y-4">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Basic information
-        </h3>
-
-        <div className="space-y-2">
+      {/* Section A — Monitor details */}
+      <section className="space-y-4">
+        <div className="space-y-1.5">
           <Label htmlFor="monitor-name">
             Monitor name <span className="text-destructive">*</span>
           </Label>
           <Input
             id="monitor-name"
-            placeholder="e.g. Production API Health"
+            placeholder="e.g. Production API"
             autoFocus={mode === "create"}
             disabled={isSubmitting}
             aria-invalid={Boolean(errors.name)}
-            aria-describedby={errors.name ? "monitor-name-error" : undefined}
+            aria-describedby={errors.name ? "monitor-name-error" : "monitor-name-helper"}
             {...register("name")}
           />
-          {errors.name && (
+          {errors.name ? (
             <p id="monitor-name-error" className="text-xs text-destructive">
               {errors.name.message}
+            </p>
+          ) : (
+            <p id="monitor-name-helper" className="text-xs text-muted-foreground">
+              Choose a name that helps you recognize this service.
             </p>
           )}
         </div>
 
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           <div className="flex items-center gap-1.5">
             <Label htmlFor="monitor-url">
-              Endpoint URL <span className="text-destructive">*</span>
+              API endpoint <span className="text-destructive">*</span>
             </Label>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
                   className="inline-flex text-muted-foreground hover:text-foreground focus:outline-none"
-                  aria-label="URL guidance"
+                  aria-label="URL reachability guidance"
                 >
                   <HelpCircle className="size-3.5" />
                 </button>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs text-xs">
-                Public HTTP or HTTPS endpoint to probe. Localhost and private IP addresses are
-                blocked for security.
+                The endpoint must be reachable from the monitoring worker. Localhost and private IP
+                addresses are blocked for security.
               </TooltipContent>
             </Tooltip>
           </div>
           <div className="relative">
-            <Globe className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            <Globe className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               id="monitor-url"
               type="url"
@@ -193,7 +202,7 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
               disabled={isSubmitting}
               className="pl-9"
               aria-invalid={Boolean(errors.url)}
-              aria-describedby={errors.url ? "monitor-url-error" : "monitor-url-hint"}
+              aria-describedby={errors.url ? "monitor-url-error" : "monitor-url-helper"}
               {...register("url")}
             />
           </div>
@@ -202,144 +211,118 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
               {errors.url.message}
             </p>
           ) : (
-            <p id="monitor-url-hint" className="text-[11px] text-muted-foreground">
-              Must be a publicly accessible HTTP or HTTPS URL without embedded credentials.
+            <p id="monitor-url-helper" className="text-xs text-muted-foreground">
+              Enter the public URL that FaultLine should check.
             </p>
           )}
         </div>
-      </div>
+      </section>
 
-      <div className="space-y-4">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Request configuration
-        </h3>
+      {/* Section B — Monitoring frequency */}
+      <section className="space-y-1.5">
+        <Label htmlFor="monitor-interval">How often should we check?</Label>
+        <Select
+          value={String(selectedInterval)}
+          disabled={isSubmitting}
+          onValueChange={(val) =>
+            setValue("intervalSeconds", Number(val), {
+              shouldValidate: true,
+            })
+          }
+        >
+          <SelectTrigger id="monitor-interval" className="w-full">
+            <SelectValue placeholder="Select check frequency" />
+          </SelectTrigger>
+          <SelectContent>
+            {monitorIntervals.map((seconds) => (
+              <SelectItem key={seconds} value={String(seconds)}>
+                {intervalDescriptions[seconds] ?? `Every ${seconds} seconds`}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          More frequent checks help detect problems sooner but generate more requests to your
+          endpoint.
+        </p>
+        {errors.intervalSeconds && (
+          <p className="text-xs text-destructive">{errors.intervalSeconds.message}</p>
+        )}
+      </section>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-2">
-            <div className="flex items-center gap-1.5">
-              <Label htmlFor="monitor-method">HTTP method</Label>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    className="inline-flex text-muted-foreground hover:text-foreground focus:outline-none"
-                    aria-label="Method guidance"
-                  >
-                    <HelpCircle className="size-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-xs text-xs">
-                  HTTP probe method. Currently FaultLine probes with GET. Additional methods and
-                  custom headers will be available soon.
-                </TooltipContent>
-              </Tooltip>
-            </div>
-            <Select
-              defaultValue="GET"
-              disabled
-              onValueChange={(val) => setValue("method", val as "GET")}
-            >
-              <SelectTrigger id="monitor-method" className="w-full">
-                <SelectValue placeholder="GET" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="GET">GET</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-[11px] text-muted-foreground">
-              GET is currently the only supported method.
+      {/* Section C & D — Advanced settings (Collapsible) */}
+      <Collapsible
+        open={advancedOpen}
+        onOpenChange={setAdvancedOpen}
+        className="rounded-lg border border-border bg-card/40 p-4 transition-all"
+      >
+        <CollapsibleTrigger className="flex w-full items-center justify-between text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm">
+          <div className="space-y-0.5">
+            <span className="text-sm font-medium text-foreground">Advanced settings</span>
+            <p className="text-xs text-muted-foreground">
+              Request timeout, expected status codes, and incident thresholds.
             </p>
           </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center gap-1.5">
-              <Label htmlFor="monitor-interval">Check interval</Label>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    className="inline-flex text-muted-foreground hover:text-foreground focus:outline-none"
-                    aria-label="Interval guidance"
-                  >
-                    <HelpCircle className="size-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-xs text-xs">
-                  Controls how frequently FaultLine executes probes. 5 minutes is recommended for
-                  balanced coverage.
-                </TooltipContent>
-              </Tooltip>
-            </div>
-            <Select
-              value={String(selectedInterval)}
-              disabled={isSubmitting}
-              onValueChange={(val) =>
-                setValue("intervalSeconds", Number(val), {
-                  shouldValidate: true,
-                })
-              }
-            >
-              <SelectTrigger id="monitor-interval" className="w-full">
-                <SelectValue placeholder="Select interval" />
-              </SelectTrigger>
-              <SelectContent>
-                {monitorIntervals.map((seconds) => (
-                  <SelectItem key={seconds} value={String(seconds)}>
-                    {intervalLabels[seconds] ?? `Every ${formatInterval(seconds)}`}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {errors.intervalSeconds && (
-              <p className="text-xs text-destructive">{errors.intervalSeconds.message}</p>
+          <ChevronDown
+            className={cn(
+              "size-4 shrink-0 text-muted-foreground transition-transform duration-200",
+              advancedOpen && "rotate-180",
             )}
-          </div>
-        </div>
+          />
+        </CollapsibleTrigger>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-2">
-            <div className="flex items-center gap-1.5">
-              <Label htmlFor="monitor-timeout">Timeout (ms)</Label>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    className="inline-flex text-muted-foreground hover:text-foreground focus:outline-none"
-                    aria-label="Timeout guidance"
-                  >
-                    <HelpCircle className="size-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-xs text-xs">
-                  Maximum response wait time before marking probe timed out. Must be between 1,000ms
-                  and 30,000ms.
-                </TooltipContent>
-              </Tooltip>
+        <CollapsibleContent className="pt-4 space-y-5">
+          {/* Section C1: Request method */}
+          <div className="space-y-1.5 border-t border-border/60 pt-3">
+            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Request method
+            </Label>
+            <div className="flex items-center gap-2">
+              <div className="inline-flex items-center rounded-md border border-border bg-muted/60 px-2.5 py-1 text-xs font-mono font-medium text-foreground">
+                GET
+              </div>
+              <span className="text-xs text-muted-foreground">
+                FaultLine currently uses GET requests.
+              </span>
             </div>
-            <Input
-              id="monitor-timeout"
-              type="number"
-              min={1000}
-              max={30000}
-              step={500}
-              placeholder="10000"
-              disabled={isSubmitting}
-              aria-invalid={Boolean(errors.timeoutMs)}
-              aria-describedby={errors.timeoutMs ? "monitor-timeout-error" : undefined}
-              {...register("timeoutMs", { valueAsNumber: true })}
-            />
-            <div className="flex flex-wrap items-center gap-1.5 pt-1">
-              <span className="text-[11px] text-muted-foreground">Presets:</span>
+          </div>
+
+          {/* Section C2: Request timeout */}
+          <div className="space-y-2 border-t border-border/60 pt-3">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="monitor-timeout">Maximum time to wait for a response</Label>
+              <span className="text-xs font-mono text-muted-foreground">{timeoutSeconds}s</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                id="monitor-timeout"
+                type="number"
+                min={1}
+                max={30}
+                step={1}
+                value={timeoutSeconds}
+                disabled={isSubmitting}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  const clamped = Math.max(1, Math.min(30, val || 1));
+                  setValue("timeoutMs", clamped * 1000, { shouldValidate: true });
+                }}
+                className="w-28 font-mono"
+              />
+              <span className="text-sm text-muted-foreground">seconds</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+              <span className="text-xs text-muted-foreground mr-1">Presets:</span>
               {timeoutPresets.map((preset) => (
                 <button
-                  key={preset.value}
+                  key={preset.seconds}
                   type="button"
                   disabled={isSubmitting}
-                  onClick={() => setValue("timeoutMs", preset.value, { shouldValidate: true })}
+                  onClick={() => setValue("timeoutMs", preset.ms, { shouldValidate: true })}
                   className={cn(
-                    "rounded border px-1.5 py-0.5 text-[11px] font-mono transition-colors",
-                    currentTimeout === preset.value
-                      ? "border-foreground bg-foreground text-background"
+                    "rounded-md border px-2 py-0.5 text-xs transition-colors",
+                    currentTimeoutMs === preset.ms
+                      ? "border-foreground bg-foreground text-background font-medium"
                       : "border-border bg-background text-muted-foreground hover:border-foreground/40 hover:text-foreground",
                   )}
                 >
@@ -348,43 +331,27 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
               ))}
             </div>
             {errors.timeoutMs && (
-              <p id="monitor-timeout-error" className="text-xs text-destructive">
-                {errors.timeoutMs.message}
-              </p>
+              <p className="text-xs text-destructive">{errors.timeoutMs.message}</p>
             )}
           </div>
 
-          <div className="space-y-2">
-            <div className="flex items-center gap-1.5">
-              <Label htmlFor="monitor-status-codes">Expected status codes</Label>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    className="inline-flex text-muted-foreground hover:text-foreground focus:outline-none"
-                    aria-label="Status codes guidance"
-                  >
-                    <HelpCircle className="size-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-xs text-xs">
-                  HTTP response codes considered healthy (100–599). Any response code not in this
-                  list is reported as a failure.
-                </TooltipContent>
-              </Tooltip>
-            </div>
+          {/* Section C3: Expected status codes */}
+          <div className="space-y-2 border-t border-border/60 pt-3">
+            <Label htmlFor="monitor-status-codes">What counts as a successful response?</Label>
+            <p className="text-xs text-muted-foreground">
+              FaultLine marks a check as successful when the endpoint returns one of these HTTP
+              status codes.
+            </p>
             <Input
               id="monitor-status-codes"
-              placeholder="200, 201"
+              placeholder="e.g. 200, 201, 204"
               disabled={isSubmitting}
+              className="font-mono text-sm"
               aria-invalid={Boolean(errors.expectedStatusCodes)}
-              aria-describedby={
-                errors.expectedStatusCodes ? "monitor-status-codes-error" : undefined
-              }
               {...register("expectedStatusCodes")}
             />
-            <div className="flex flex-wrap items-center gap-1.5 pt-1">
-              <span className="text-[11px] text-muted-foreground">Presets:</span>
+            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+              <span className="text-xs text-muted-foreground mr-1">Presets:</span>
               {statusCodePresets.map((preset) => (
                 <button
                   key={preset.label}
@@ -394,9 +361,9 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
                     setValue("expectedStatusCodes", preset.value, { shouldValidate: true })
                   }
                   className={cn(
-                    "rounded border px-1.5 py-0.5 text-[11px] font-mono transition-colors",
+                    "rounded-md border px-2 py-0.5 text-xs transition-colors",
                     currentStatusCodes === preset.value
-                      ? "border-foreground bg-foreground text-background"
+                      ? "border-foreground bg-foreground text-background font-medium"
                       : "border-border bg-background text-muted-foreground hover:border-foreground/40 hover:text-foreground",
                   )}
                 >
@@ -405,32 +372,96 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
               ))}
             </div>
             {errors.expectedStatusCodes && (
-              <p id="monitor-status-codes-error" className="text-xs text-destructive">
-                {errors.expectedStatusCodes.message}
-              </p>
+              <p className="text-xs text-destructive">{errors.expectedStatusCodes.message}</p>
             )}
           </div>
-        </div>
 
-        <div className="flex items-center gap-2 pt-2">
-          <input
-            id="monitor-active"
-            type="checkbox"
-            className="size-4 rounded border-border text-primary focus:ring-ring"
-            disabled={isSubmitting}
-            checked={activeChecked}
-            onChange={(e) => setValue("active", e.target.checked)}
-          />
+          {/* Section D: Incident behavior */}
+          <div className="space-y-3 border-t border-border/60 pt-3">
+            <div>
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Incident behavior
+              </h4>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Configure when FaultLine opens and resolves incidents.
+              </p>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="monitor-failure-threshold">Open an incident after</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="monitor-failure-threshold"
+                    type="number"
+                    min={1}
+                    max={10}
+                    disabled={isSubmitting}
+                    className="w-20 font-mono"
+                    aria-invalid={Boolean(errors.failureThreshold)}
+                    {...register("failureThreshold", { valueAsNumber: true })}
+                  />
+                  <span className="text-xs text-muted-foreground">failed checks</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  FaultLine opens an incident when this many consecutive checks fail.
+                </p>
+                {errors.failureThreshold && (
+                  <p className="text-xs text-destructive">{errors.failureThreshold.message}</p>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="monitor-recovery-threshold">Resolve an incident after</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="monitor-recovery-threshold"
+                    type="number"
+                    min={1}
+                    max={10}
+                    disabled={isSubmitting}
+                    className="w-20 font-mono"
+                    aria-invalid={Boolean(errors.recoveryThreshold)}
+                    {...register("recoveryThreshold", { valueAsNumber: true })}
+                  />
+                  <span className="text-xs text-muted-foreground">successful checks</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  FaultLine automatically resolves an incident after this many consecutive checks
+                  succeed.
+                </p>
+                {errors.recoveryThreshold && (
+                  <p className="text-xs text-destructive">{errors.recoveryThreshold.message}</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+
+      {/* Section E — Start monitoring */}
+      <section className="flex items-start justify-between gap-4 rounded-lg border border-border bg-card/30 p-4">
+        <div className="space-y-0.5">
           <Label
             htmlFor="monitor-active"
-            className="cursor-pointer text-sm font-normal text-foreground"
+            className="cursor-pointer text-sm font-medium text-foreground"
           >
-            Enable monitor immediately
+            Start monitoring immediately
           </Label>
+          <p className="text-xs text-muted-foreground">
+            When enabled, FaultLine will schedule checks as soon as the monitor is created.
+          </p>
         </div>
-      </div>
+        <Switch
+          id="monitor-active"
+          disabled={isSubmitting}
+          checked={activeChecked}
+          onCheckedChange={(checked) => setValue("active", checked)}
+        />
+      </section>
 
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
+      {/* Dialog footer */}
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3 border-t border-border pt-4">
         <Button type="button" variant="outline" disabled={isSubmitting} onClick={onCancel}>
           Cancel
         </Button>

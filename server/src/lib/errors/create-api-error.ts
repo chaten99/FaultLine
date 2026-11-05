@@ -24,7 +24,11 @@ export type ApiErrorCode =
   | "PROBE_TIMEOUT"
   | "TOO_MANY_REDIRECTS"
   | "PORT_NOT_PERMITTED"
-  | "RATE_LIMITED";
+  | "RATE_LIMITED"
+  | "INCIDENT_NOT_FOUND"
+  | "INCIDENT_ALREADY_RESOLVED"
+  | "INCIDENT_ALREADY_ACKNOWLEDGED"
+  | "CHECK_NOT_FOUND";
 
 export type ApiError = Error & {
   statusCode: number;
