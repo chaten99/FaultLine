@@ -59,3 +59,7 @@ export const listChecksSchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(50).default(20),
   status: z.enum(["queued", "running", "success", "failure", "timeout", "error"]).optional(),
 });
+
+export const checkIdSchema = z.object({
+  checkId: z.string().trim().min(1, "Invalid check id."),
+});

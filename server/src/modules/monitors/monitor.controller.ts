@@ -3,6 +3,7 @@ import { createApiError } from "../../lib/errors/create-api-error.js";
 import type { AuthenticatedRequest } from "../auth/auth.types.js";
 import {
   createMonitorSchema,
+  checkIdSchema,
   listChecksSchema,
   listMonitorSchema,
   monitorIdSchema,
@@ -79,7 +80,7 @@ export const listChecks = async (request: Request, response: Response) => {
 
 export const getCheck = async (request: Request, response: Response) => {
   const { id } = monitorIdSchema.parse(request.params);
-  const { checkId } = request.params;
+  const { checkId } = checkIdSchema.parse(request.params);
   const check = await getMonitorCheck(userId(request), id, checkId);
   return response.json(check);
 };
