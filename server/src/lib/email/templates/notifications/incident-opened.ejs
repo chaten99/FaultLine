@@ -1,0 +1,11 @@
+<%
+const body = `
+  <p style="margin:0 0 12px;"><span style="display:inline-block;padding:3px 10px;background:#171717;color:#ffffff;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">${e(statusLabel)}</span></p>
+  <h1 style="margin:0 0 16px;font-size:26px;line-height:1.25;">Incident detected: ${e(monitorName)}</h1>
+  <p style="margin:0 0 24px;color:#525252;">FaultLine detected repeated failures while monitoring <strong>${e(monitorName)}</strong>. A check failed ${e(failureThreshold)} times in a row, which reached the failure threshold configured for this monitor.</p>
+  ${include("_details.ejs", { rows })}
+  ${include("_action.ejs", { url: incidentUrl })}
+  <p style="margin:0;color:#737373;font-size:13px;">You are receiving this because incident alerts are enabled for your FaultLine account. Never share this email: it links to your account.</p>
+`;
+%>
+<%- include("../layouts/email-layout.ejs", { subject, body, footer }) %>

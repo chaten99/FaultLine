@@ -3,11 +3,17 @@ import { env } from "./config/env.js";
 import { logger } from "./config/logger.js";
 import { closeRedisConnections, getRedisClient } from "./lib/redis/redis.service.js";
 import { closeMonitorCheckQueue } from "./queues/monitor-check.queue.js";
+import { closeNotificationQueue } from "./queues/notification.queue.js";
 import { reconcileSchedulers } from "./queues/monitor-scheduler.service.js";
+import { runNotificationMaintenance } from "./modules/notifications/notification-maintenance.service.js";
 import {
   closeMonitorCheckWorker,
   createMonitorCheckWorker,
 } from "./workers/monitor-check.worker.js";
+import {
+  closeNotificationWorker,
+  createNotificationWorker,
+} from "./workers/notification.worker.js";
 
 const startWorkerProcess = async () => {
   try {
@@ -30,6 +36,16 @@ const startWorkerProcess = async () => {
       "Monitoring worker started and listening for jobs",
     );
 
+    createNotificationWorker();
+    logger.info(
+      { queue: env.NOTIFICATION_QUEUE_NAME, concurrency: env.NOTIFICATION_WORKER_CONCURRENCY },
+      "Notification worker started and listening for jobs",
+    );
+    void runNotificationMaintenance();
+    const notificationTimer = setInterval(() => {
+      void runNotificationMaintenance();
+    }, env.NOTIFICATION_OUTBOX_INTERVAL_MS);
+
     const intervalMs = env.RECONCILIATION_INTERVAL_SECONDS * 1000;
     const reconciliationTimer = setInterval(() => {
       void reconcileSchedulers();
@@ -42,10 +58,13 @@ const startWorkerProcess = async () => {
       logger.info({ signal }, "Shutting down monitoring worker process gracefully");
 
       clearInterval(reconciliationTimer);
+      clearInterval(notificationTimer);
 
       try {
         await closeMonitorCheckWorker();
+        await closeNotificationWorker();
         await closeMonitorCheckQueue();
+        await closeNotificationQueue();
         await closeRedisConnections();
         await mongoose.disconnect();
         logger.info("Worker process shutdown complete");

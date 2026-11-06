@@ -15,6 +15,7 @@ import { MonitorsPage } from "@/features/monitors/pages/monitors-page";
 import { MonitorDetailsPage } from "@/features/monitors/pages/monitor-details-page";
 import { IncidentsPage } from "@/features/incidents/pages/incidents-page";
 import { IncidentDetailsPage } from "@/features/incidents/pages/incident-details-page";
+import { NotificationsPage } from "@/features/notifications/pages/notifications-page";
 
 export default function App() {
   const [queryClient] = useState(
@@ -114,6 +115,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <IncidentDetailsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings/notifications"
+            element={
+              <ProtectedRoute>
+                <NotificationsPage />
               </ProtectedRoute>
             }
           />
