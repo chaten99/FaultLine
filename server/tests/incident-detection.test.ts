@@ -5,6 +5,11 @@ import { Monitor } from "../src/modules/monitors/monitor.model.js";
 import { Incident } from "../src/modules/incidents/incident.model.js";
 import { IncidentTimeline } from "../src/modules/incidents/incident-timeline.model.js";
 import * as redisService from "../src/lib/redis/redis.service.js";
+import { recordIncidentNotificationEvent } from "../src/modules/notifications/notification-outbox.service.js";
+
+vi.mock("../src/modules/notifications/notification-outbox.service.js", () => ({
+  recordIncidentNotificationEvent: vi.fn().mockResolvedValue(undefined),
+}));
 
 vi.mock("../src/lib/redis/redis.service.js", () => ({
   acquireLock: vi.fn().mockResolvedValue(true),
@@ -181,6 +186,7 @@ describe("Incident Detection Engine Unit Tests", () => {
 
     expect(monitorDoc.consecutiveFailures).toBe(2);
     expect(incidentsStore).toHaveLength(0);
+    expect(recordIncidentNotificationEvent).not.toHaveBeenCalled();
 
     await evaluateCheckForIncident(monitorId, {
       runId: "run-fail-3",
@@ -197,6 +203,11 @@ describe("Incident Detection Engine Unit Tests", () => {
     expect(incident.status).toBe("open");
     expect(incident.title).toContain("Checkout API");
     expect(incident.failureCountAtCreation).toBe(3);
+    expect(recordIncidentNotificationEvent).toHaveBeenCalledTimes(1);
+    expect(recordIncidentNotificationEvent).toHaveBeenCalledWith(
+      "incident.opened",
+      String(incident._id),
+    );
 
     expect(timelineStore).toHaveLength(1);
     expect(timelineStore[0]!.type).toBe("incident.created");
@@ -265,6 +276,7 @@ describe("Incident Detection Engine Unit Tests", () => {
     expect(timelineStore).toHaveLength(2);
     expect(timelineStore[1]!.type).toBe("incident.failure_observed");
     expect(timelineStore[1]!.incidentId).toBe(incidentId);
+    expect(recordIncidentNotificationEvent).toHaveBeenCalledTimes(1);
     expect(redisService.publishDomainEvent).toHaveBeenCalledWith(
       "incident.updated",
       expect.objectContaining({
@@ -296,6 +308,7 @@ describe("Incident Detection Engine Unit Tests", () => {
     expect(monitorDoc.consecutiveSuccesses).toBe(1);
     expect(incident.status).toBe("open");
     expect(timelineStore.some((t) => t.type === "incident.recovery_progress")).toBe(true);
+    expect(recordIncidentNotificationEvent).toHaveBeenCalledTimes(1);
 
     const resolveTime = new Date();
     await evaluateCheckForIncident(monitorId, {
@@ -311,6 +324,11 @@ describe("Incident Detection Engine Unit Tests", () => {
     expect(monitorDoc.activeIncidentId).toBeNull();
     expect(monitorDoc.consecutiveSuccesses).toBe(0);
     expect(timelineStore.some((t) => t.type === "incident.resolved")).toBe(true);
+    expect(recordIncidentNotificationEvent).toHaveBeenCalledTimes(2);
+    expect(recordIncidentNotificationEvent).toHaveBeenLastCalledWith(
+      "incident.resolved",
+      String(incident._id),
+    );
 
     expect(redisService.publishDomainEvent).toHaveBeenCalledWith(
       "incident.resolved",

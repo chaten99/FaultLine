@@ -41,8 +41,8 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-background text-foreground">
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-20 w-64 border-r border-border bg-background p-5 transition-transform lg:translate-x-0",
-          open ? "translate-x-0" : "-translate-x-full",
+          "fixed inset-y-0 left-0 z-30 w-64 border-r border-border bg-background p-5 transition-[transform,box-shadow] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform lg:translate-x-0 lg:shadow-none",
+          open ? "translate-x-0 shadow-2xl" : "-translate-x-full shadow-none",
         )}
       >
         <div className="flex items-center justify-between">
@@ -106,6 +106,23 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           >
             Incidents
           </NavLink>
+          <p className="px-3 pt-6 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            Settings
+          </p>
+          <NavLink
+            to="/settings/notifications"
+            onClick={() => setOpen(false)}
+            className={({ isActive }) =>
+              cn(
+                "block rounded-md px-3 py-2.5 text-sm font-medium transition-all duration-150",
+                isActive
+                  ? "bg-accent text-accent-foreground shadow-xs"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+              )
+            }
+          >
+            Notifications
+          </NavLink>
         </nav>
 
         <AlertDialog>
@@ -129,13 +146,14 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         </AlertDialog>
       </aside>
 
-      {open && (
-        <button
-          className="fixed inset-0 z-10 bg-foreground/20 lg:hidden"
-          onClick={() => setOpen(false)}
-          aria-label="Close navigation overlay"
-        />
-      )}
+      <button
+        className="nav-overlay fixed inset-0 z-20 bg-foreground/30 backdrop-blur-[2px] lg:hidden"
+        data-open={open}
+        tabIndex={open ? 0 : -1}
+        aria-hidden={!open}
+        onClick={() => setOpen(false)}
+        aria-label="Close navigation overlay"
+      />
 
       <div className="lg:pl-64">
         <header className="flex h-16 items-center justify-between border-b border-border bg-background px-5 sm:px-8">
@@ -159,7 +177,9 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="mx-auto max-w-6xl space-y-10 px-5 py-10 sm:px-8">{children}</main>
+        <main className="page-enter mx-auto max-w-6xl space-y-10 px-5 py-10 sm:px-8">
+          {children}
+        </main>
       </div>
     </div>
   );

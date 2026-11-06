@@ -5,6 +5,7 @@ import { Monitor } from "../monitors/monitor.model.js";
 import { createApiError } from "../../lib/errors/create-api-error.js";
 import { publishDomainEvent } from "../../lib/redis/redis.service.js";
 import { logger } from "../../config/logger.js";
+import { recordIncidentNotificationEvent } from "../notifications/notification-outbox.service.js";
 
 const QUALIFYING_FAILURES = ["UNEXPECTED_STATUS", "TIMEOUT", "NETWORK_ERROR", "DNS_FAILURE"];
 
@@ -127,6 +128,8 @@ export const evaluateCheckForIncident = async (
               lastEvaluatedCheckId: checkData.runId,
             },
           });
+
+          await recordIncidentNotificationEvent("incident.opened", String(incidentDoc._id));
 
           await publishDomainEvent("incident.created", {
             userId: String(monitor.userId),
@@ -261,6 +264,8 @@ export const evaluateCheckForIncident = async (
             lastEvaluatedCheckId: checkData.runId,
           },
         });
+
+        await recordIncidentNotificationEvent("incident.resolved", String(activeIncident._id));
 
         await publishDomainEvent("incident.resolved", {
           userId: String(monitor.userId),
@@ -450,6 +455,8 @@ export const acknowledgeIncident = async (userId: string, incidentId: string) =>
     logger.warn({ err: timelineErr }, "Failed to persist timeline entry");
   }
 
+  await recordIncidentNotificationEvent("incident.acknowledged", String(incident._id));
+
   await publishDomainEvent("incident.acknowledged", {
     userId: String(incident.userId),
     payload: {
@@ -520,6 +527,8 @@ export const resolveIncidentManually = async (
   } catch (timelineErr) {
     logger.warn({ err: timelineErr }, "Failed to persist timeline entry");
   }
+
+  await recordIncidentNotificationEvent("incident.resolved", String(incident._id));
 
   await publishDomainEvent("incident.resolved", {
     userId: String(incident.userId),
