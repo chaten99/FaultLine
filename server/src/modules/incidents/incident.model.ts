@@ -58,6 +58,7 @@ const incidentSchema = new Schema(
 incidentSchema.index({ userId: 1, createdAt: -1 });
 incidentSchema.index({ monitorId: 1, createdAt: -1 });
 incidentSchema.index({ status: 1, createdAt: -1 });
+incidentSchema.index({ updatedAt: -1 });
 incidentSchema.index(
   { monitorId: 1 },
   {

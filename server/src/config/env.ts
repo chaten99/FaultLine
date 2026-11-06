@@ -36,6 +36,20 @@ const environmentSchema = z.object({
   CHECK_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
   MONITOR_QUEUE_NAME: z.string().min(1).default("faultline-monitor-checks"),
   RECONCILIATION_INTERVAL_SECONDS: z.coerce.number().int().min(60).max(86400).default(300),
+  NOTIFICATION_ENCRYPTION_KEY: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z
+      .string()
+      .regex(/^[a-fA-F0-9]{64}$/, "NOTIFICATION_ENCRYPTION_KEY must be 64 hexadecimal characters")
+      .optional(),
+  ),
+  NOTIFICATION_QUEUE_NAME: z.string().min(1).default("faultline-notifications"),
+  NOTIFICATION_WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(50).default(5),
+  NOTIFICATION_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(5),
+  NOTIFICATION_DELIVERY_TIMEOUT_MS: z.coerce.number().int().min(1000).max(30000).default(10000),
+  NOTIFICATION_RETRY_BASE_MS: z.coerce.number().int().min(500).max(60000).default(5000),
+  NOTIFICATION_RETRY_MAX_MS: z.coerce.number().int().min(1000).max(3600000).default(300000),
+  NOTIFICATION_OUTBOX_INTERVAL_MS: z.coerce.number().int().min(5000).max(600000).default(30000),
 });
 
 const parsedEnvironment = environmentSchema.safeParse(process.env);

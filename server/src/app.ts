@@ -9,6 +9,7 @@ import { authRouter } from "./modules/auth/auth.routes.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { monitorRouter } from "./modules/monitors/monitor.routes.js";
 import { incidentRouter } from "./modules/incidents/incident.routes.js";
+import { notificationRouter } from "./modules/notifications/notification.routes.js";
 
 export const app = express();
 app.use(helmet());
@@ -31,6 +32,7 @@ app.use("/api", healthRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/monitors", monitorRouter);
 app.use("/api/incidents", incidentRouter);
+app.use("/api/notifications", notificationRouter);
 app.use((_request, response) => {
   response.status(404).json({ status: "error", message: "Route not found" });
 });
