@@ -56,6 +56,7 @@ import { formatInterval, formatStatusCodes } from "../schemas/monitor.schema";
 import { getApiErrorMessage } from "@/lib/api-error";
 import { useMonitorSocket } from "../realtime/use-monitor-socket";
 import { cn } from "@/lib/utils";
+import { MonitorAnalyticsPanel } from "@/features/analytics/components/monitor-analytics-panel";
 
 export function MonitorDetailsPage() {
   const { id } = useParams<{ id: string }>();
@@ -680,6 +681,8 @@ export function MonitorDetailsPage() {
             </div>
           )}
         </section>
+
+        <MonitorAnalyticsPanel monitorId={monitor._id} />
       </div>
 
       <EditMonitorDialog

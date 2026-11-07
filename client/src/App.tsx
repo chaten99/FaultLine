@@ -14,6 +14,7 @@ import { DashboardPage } from "@/features/dashboard/pages/dashboard-page";
 import { MonitorsPage } from "@/features/monitors/pages/monitors-page";
 import { MonitorDetailsPage } from "@/features/monitors/pages/monitor-details-page";
 import { IncidentsPage } from "@/features/incidents/pages/incidents-page";
+import { AnalyticsPage } from "@/features/analytics/pages/analytics-page";
 import { IncidentDetailsPage } from "@/features/incidents/pages/incident-details-page";
 import { NotificationsPage } from "@/features/notifications/pages/notifications-page";
 
@@ -123,6 +124,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <NotificationsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/analytics"
+            element={
+              <ProtectedRoute>
+                <AnalyticsPage />
               </ProtectedRoute>
             }
           />

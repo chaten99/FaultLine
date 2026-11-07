@@ -56,6 +56,16 @@ const matchesCondition = (actual: unknown, condition: unknown): boolean => {
           return left !== undefined && (left as number) <= (comparable(expected) as number);
         case "$gt":
           return left !== undefined && (left as number) > (comparable(expected) as number);
+        case "$regex":
+          return (
+            typeof actual === "string" &&
+            new RegExp(
+              expected as string,
+              String((condition as Record<string, unknown>).$options ?? ""),
+            ).test(actual)
+          );
+        case "$options":
+          return true;
         case "$gte":
           return left !== undefined && (left as number) >= (comparable(expected) as number);
         default:
@@ -293,7 +303,18 @@ export const bindMemoryModel = (model: unknown, options: MemoryModelOptions = {}
     }),
   );
 
+  const deleteMany = vi.fn((filter: Filter) =>
+    query(() => {
+      const before = docs.length;
+      for (let index = docs.length - 1; index >= 0; index -= 1) {
+        if (matches(docs[index] as Doc, filter)) docs.splice(index, 1);
+      }
+      return { deletedCount: before - docs.length };
+    }),
+  );
+
   Object.assign(target, {
+    deleteMany,
     find,
     findOne,
     findById,
