@@ -5,6 +5,7 @@ import { closeRedisConnections, getRedisClient } from "./lib/redis/redis.service
 import { closeMonitorCheckQueue } from "./queues/monitor-check.queue.js";
 import { closeNotificationQueue } from "./queues/notification.queue.js";
 import { reconcileSchedulers } from "./queues/monitor-scheduler.service.js";
+import { ensureLifecycleBaselines } from "./modules/monitors/monitor-lifecycle.service.js";
 import { runNotificationMaintenance } from "./modules/notifications/notification-maintenance.service.js";
 import {
   closeMonitorCheckWorker,
@@ -21,6 +22,9 @@ const startWorkerProcess = async () => {
 
     await mongoose.connect(env.MONGODB_URI);
     logger.info("Worker connected to MongoDB");
+    await ensureLifecycleBaselines().catch((error: unknown) => {
+      logger.warn({ err: error }, "Monitor lifecycle baseline failed");
+    });
 
     const redis = getRedisClient();
     if (redis.status === "wait") {
