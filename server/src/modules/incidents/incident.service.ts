@@ -7,7 +7,7 @@ import { publishDomainEvent } from "../../lib/redis/redis.service.js";
 import { logger } from "../../config/logger.js";
 import { recordIncidentNotificationEvent } from "../notifications/notification-outbox.service.js";
 
-const QUALIFYING_FAILURES = ["UNEXPECTED_STATUS", "TIMEOUT", "NETWORK_ERROR", "DNS_FAILURE"];
+export const QUALIFYING_FAILURES = ["UNEXPECTED_STATUS", "TIMEOUT", "NETWORK_ERROR", "DNS_FAILURE"];
 
 export interface EvaluateCheckInput {
   runId: string;

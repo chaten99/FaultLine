@@ -34,7 +34,9 @@ export type ApiErrorCode =
   | "INTEGRATION_LIMIT_REACHED"
   | "DELIVERY_NOT_FOUND"
   | "DELIVERY_NOT_RETRYABLE"
-  | "INVALID_INTEGRATION_URL";
+  | "INVALID_INTEGRATION_URL"
+  | "INVALID_RANGE"
+  | "EXPORT_TOO_LARGE";
 
 export type ApiError = Error & {
   statusCode: number;

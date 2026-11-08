@@ -3,11 +3,15 @@ import { createServer } from "node:http";
 import { app } from "./app.js";
 import { env } from "./config/env.js";
 import { logger } from "./config/logger.js";
+import { ensureLifecycleBaselines } from "./modules/monitors/monitor-lifecycle.service.js";
 import { startMonitorRealtime } from "./realtime/monitor-realtime.js";
 
 const startServer = async () => {
   try {
     await mongoose.connect(env.MONGODB_URI);
+    await ensureLifecycleBaselines().catch((error: unknown) => {
+      logger.warn({ err: error }, "Monitor lifecycle baseline failed");
+    });
     const server = createServer(app);
     const closeRealtime = await startMonitorRealtime(server);
     server.listen(env.PORT, () => {

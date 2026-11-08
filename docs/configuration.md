@@ -61,3 +61,7 @@ Create a Slack app at https://api.slack.com/apps, enable Incoming Webhooks, add 
 2. Open `/settings/notifications`, use Send test email, or add a Slack or webhook integration and choose Send test notification. Tests run a single real attempt and show the actual result.
 3. For webhooks, expose a public HTTPS receiver (for example through a tunnel). Private, loopback and link-local destinations are always rejected.
 4. To produce a real incident, create a monitor that fails (for example a URL returning HTTP 500) with a low failure threshold.
+
+## Analytics
+
+Analytics adds no new environment variables. History is bounded by `CHECK_RETENTION_DAYS` (default 30): ranges that reach further back show the older part as unknown. Set `ANALYTICS_TEST_MONGODB_URI` only when running the MongoDB-backed analytics integration test; it drops the database it connects to, so use a throwaway database.

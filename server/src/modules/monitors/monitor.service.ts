@@ -13,6 +13,11 @@ import { logger } from "../../config/logger.js";
 import crypto from "node:crypto";
 import { env } from "../../config/env.js";
 import { publishDomainEvent } from "../../lib/redis/redis.service.js";
+import {
+  deleteMonitorLifecycle,
+  recordMonitorActiveChange,
+  recordMonitorCreated,
+} from "./monitor-lifecycle.service.js";
 
 const ensureOwned = async (userId: string, monitorId: string) => {
   if (!Types.ObjectId.isValid(monitorId) || !/^[a-f\d]{24}$/i.test(monitorId)) {
@@ -101,6 +106,7 @@ export const createMonitor = async (
     }
   }
   const monitor = await Monitor.create({ ...sanitized, userId });
+  await recordMonitorCreated(monitor);
 
   if (monitor.active) {
     try {
@@ -167,6 +173,8 @@ export const updateMonitor = async (
     throw createApiError("Monitor not found.", 404, "MONITOR_NOT_FOUND");
   }
 
+  await recordMonitorActiveChange(monitor, previous.active);
+
   try {
     if (monitor.active) {
       await scheduleMonitor(monitor);
@@ -194,6 +202,7 @@ export const deleteMonitor = async (userId: string, monitorId: string) => {
   try {
     await unscheduleMonitor(monitorId);
     await MonitorCheck.deleteMany({ monitorId, userId });
+    await deleteMonitorLifecycle(monitorId);
   } catch (error) {
     logger.warn({ monitorId, err: error }, "Error cleaning up scheduler or checks after deletion");
   }

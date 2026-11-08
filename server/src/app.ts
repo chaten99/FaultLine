@@ -9,6 +9,7 @@ import { authRouter } from "./modules/auth/auth.routes.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { monitorRouter } from "./modules/monitors/monitor.routes.js";
 import { incidentRouter } from "./modules/incidents/incident.routes.js";
+import { analyticsRouter } from "./modules/analytics/analytics.routes.js";
 import { notificationRouter } from "./modules/notifications/notification.routes.js";
 
 export const app = express();
@@ -22,6 +23,7 @@ app.use(
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-CSRF-Token", "X-Request-ID"],
+    exposedHeaders: ["Content-Disposition"],
   }),
 );
 app.use(express.json({ limit: "10kb" }));
@@ -33,6 +35,7 @@ app.use("/api/auth", authRouter);
 app.use("/api/monitors", monitorRouter);
 app.use("/api/incidents", incidentRouter);
 app.use("/api/notifications", notificationRouter);
+app.use("/api/analytics", analyticsRouter);
 app.use((_request, response) => {
   response.status(404).json({ status: "error", message: "Route not found" });
 });
