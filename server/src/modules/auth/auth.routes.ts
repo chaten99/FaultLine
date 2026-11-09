@@ -1,10 +1,15 @@
 import { Router } from "express";
 import { authenticate } from "../../middleware/authenticate.js";
+import { rateLimit } from "../../lib/rate-limit.js";
 import {
   forgotPassword,
   login,
   logout,
   me,
+  password,
+  removeOtherSessions,
+  removeSession,
+  sessions,
   refresh,
   register,
   resendVerification,
@@ -24,3 +29,17 @@ authRouter.post("/reset-password", resetPassword);
 authRouter.post("/refresh", refresh);
 authRouter.get("/me", authenticate, me);
 authRouter.post("/logout", authenticate, logout);
+authRouter.post("/password", authenticate, rateLimit("auth:password", 5, 900), password);
+authRouter.get("/sessions", authenticate, sessions);
+authRouter.post(
+  "/sessions/revoke-others",
+  authenticate,
+  rateLimit("auth:sessions", 20, 900),
+  removeOtherSessions,
+);
+authRouter.delete(
+  "/sessions/:id",
+  authenticate,
+  rateLimit("auth:sessions", 20, 900),
+  removeSession,
+);

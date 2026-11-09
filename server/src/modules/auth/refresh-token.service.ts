@@ -10,7 +10,13 @@ export const issueRefreshToken = async (userId: string) => {
   const familyId = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + env.JWT_REFRESH_ABSOLUTE_TTL_DAYS * 86_400_000);
   const token = createRefreshToken(userId, familyId, env.JWT_REFRESH_ABSOLUTE_TTL_DAYS * 86_400);
-  await RefreshTokenFamily.create({ familyId, userId, tokenHash: hashToken(token), expiresAt });
+  await RefreshTokenFamily.create({
+    familyId,
+    userId,
+    tokenHash: hashToken(token),
+    expiresAt,
+    lastUsedAt: new Date(),
+  });
   return token;
 };
 
@@ -47,6 +53,7 @@ export const rotateRefreshToken = async (token: string) => {
     env.JWT_REFRESH_IDLE_TTL_DAYS * 86_400,
   );
   family.tokenHash = hashToken(next);
+  family.lastUsedAt = new Date();
   await family.save();
   return { token: next, userId: claims.sub as string };
 };

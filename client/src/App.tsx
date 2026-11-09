@@ -17,6 +17,7 @@ import { IncidentsPage } from "@/features/incidents/pages/incidents-page";
 import { AnalyticsPage } from "@/features/analytics/pages/analytics-page";
 import { IncidentDetailsPage } from "@/features/incidents/pages/incident-details-page";
 import { NotificationsPage } from "@/features/notifications/pages/notifications-page";
+import { ProfilePage } from "@/features/profile/pages/profile-page";
 
 export default function App() {
   const [queryClient] = useState(
@@ -124,6 +125,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <NotificationsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/profile"
+            element={
+              <ProtectedRoute>
+                <ProfilePage />
               </ProtectedRoute>
             }
           />
