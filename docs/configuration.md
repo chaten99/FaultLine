@@ -65,3 +65,10 @@ Create a Slack app at https://api.slack.com/apps, enable Incoming Webhooks, add 
 ## Analytics
 
 Analytics adds no new environment variables. History is bounded by `CHECK_RETENTION_DAYS` (default 30): ranges that reach further back show the older part as unknown. Set `ANALYTICS_TEST_MONGODB_URI` only when running the MongoDB-backed analytics integration test; it drops the database it connects to, so use a throwaway database.
+
+## Public Status Pages
+
+- `STATUS_PAGE_TOKEN_SECRET`: secret (at least 32 characters) used to sign unsubscribe links. Set a unique random value in production; changing it invalidates unsubscribe links in emails that were already sent.
+- `APP_ORIGIN`: the public base URL used for status page, confirmation and unsubscribe links (`<APP_ORIGIN>/status/<slug>`).
+
+Subscriber emails use the existing `RESEND_API_KEY`, `RESEND_FROM_EMAIL` and notification queue settings. Behind nginx, forward `X-Forwarded-For` so rate limits apply per visitor.

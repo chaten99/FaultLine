@@ -3,6 +3,7 @@ import { Server } from "socket.io";
 import { Redis } from "ioredis";
 import { clientOrigins, env } from "../config/env.js";
 import { logger } from "../config/logger.js";
+import { registerPublicNamespace, routePublicEvent } from "./public-realtime.js";
 import { getAccessTokenExpiry, verifyAccessToken } from "../modules/auth/auth-token.service.js";
 
 const channel = "faultline:domain-events";
@@ -30,6 +31,9 @@ export const startMonitorRealtime = async (httpServer: HttpServer) => {
     socket.once("disconnect", () => clearTimeout(expiryTimer));
   });
 
+  const publicNamespace = io.of("/public");
+  registerPublicNamespace(publicNamespace);
+
   subscriber = new Redis(env.REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: null });
   subscriber.on("error", (err) =>
     logger.error({ err: err.message }, "Realtime Redis subscriber error"),
@@ -41,8 +45,10 @@ export const startMonitorRealtime = async (httpServer: HttpServer) => {
       const event = JSON.parse(raw) as {
         type?: string;
         userId?: string;
+        pageId?: string;
         payload?: Record<string, unknown>;
       };
+      if (routePublicEvent(publicNamespace, event)) return;
       if (
         !event.type ||
         !event.userId ||

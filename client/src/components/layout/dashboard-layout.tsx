@@ -120,6 +120,20 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           >
             Analytics
           </NavLink>
+          <NavLink
+            to="/status-pages"
+            onClick={() => setOpen(false)}
+            className={({ isActive }) =>
+              cn(
+                "block rounded-md px-3 py-2.5 text-sm font-medium transition-all duration-150",
+                isActive
+                  ? "bg-accent text-accent-foreground shadow-xs"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+              )
+            }
+          >
+            Status Pages
+          </NavLink>
           <p className="px-3 pt-6 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
             Settings
           </p>

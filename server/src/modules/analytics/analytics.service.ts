@@ -42,6 +42,7 @@ export type RangeQuery = { range?: RangePreset; from?: Date; to?: Date; monitorI
 
 type MonitorFilters = {
   monitorId?: string;
+  monitorIds?: string[];
   status?: "all" | "active" | "paused";
   search?: string;
 };
@@ -52,6 +53,9 @@ const loadMonitors = async (
 ): Promise<MetricMonitor[]> => {
   const filter: Record<string, unknown> = { userId: new Types.ObjectId(userId) };
   if (filters.monitorId) filter._id = new Types.ObjectId(filters.monitorId);
+  if (filters.monitorIds) {
+    filter._id = { $in: filters.monitorIds.map((id) => new Types.ObjectId(id)) };
+  }
   if (filters.status === "active") filter.active = true;
   if (filters.status === "paused") filter.active = false;
   if (filters.search?.trim()) {
@@ -289,6 +293,27 @@ export const getAvailability = async (userId: string, query: RangeQuery, now = n
     },
     timeline: payload.timeline,
     gaps: payload.gaps,
+  };
+};
+
+export const getScopedAvailability = async (
+  userId: string,
+  monitorIds: string[],
+  range: { range: RangePreset },
+  now = new Date(),
+) => {
+  const window = toWindow(range, now);
+  const monitors = monitorIds.length > 0 ? await loadMonitors(userId, { monitorIds }) : [];
+  const inputs = await gatherInputs(userId, monitors, window, now);
+  const payload = await availabilityPayload(userId, inputs, window, now);
+  return {
+    window: windowMeta(window, now),
+    availability: payload.summary.availability,
+    timeline: payload.timeline.map((cell) => ({
+      start: cell.start,
+      end: cell.end,
+      state: cell.state,
+    })),
   };
 };
 

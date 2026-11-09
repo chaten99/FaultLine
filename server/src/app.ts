@@ -10,9 +10,12 @@ import { errorHandler } from "./middleware/error-handler.js";
 import { monitorRouter } from "./modules/monitors/monitor.routes.js";
 import { incidentRouter } from "./modules/incidents/incident.routes.js";
 import { analyticsRouter } from "./modules/analytics/analytics.routes.js";
+import { publicStatusRouter } from "./modules/status-pages/status-page-public.routes.js";
+import { statusPageRouter } from "./modules/status-pages/status-page.routes.js";
 import { notificationRouter } from "./modules/notifications/notification.routes.js";
 
 export const app = express();
+app.set("trust proxy", "loopback, linklocal, uniquelocal");
 app.use(helmet());
 app.use(
   cors({
@@ -36,6 +39,8 @@ app.use("/api/monitors", monitorRouter);
 app.use("/api/incidents", incidentRouter);
 app.use("/api/notifications", notificationRouter);
 app.use("/api/analytics", analyticsRouter);
+app.use("/api/status-pages", statusPageRouter);
+app.use("/api/public/status-pages", publicStatusRouter);
 app.use((_request, response) => {
   response.status(404).json({ status: "error", message: "Route not found" });
 });

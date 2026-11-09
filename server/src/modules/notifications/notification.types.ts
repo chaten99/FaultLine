@@ -37,6 +37,7 @@ export type FailureCategory =
   | "EMAIL_NOT_VERIFIED"
   | "INTEGRATION_UNAVAILABLE"
   | "CONFIGURATION_ERROR"
+  | "SUBSCRIPTION_INACTIVE"
   | "UNKNOWN";
 
 export type IncidentNotificationSnapshot = {
@@ -92,5 +93,6 @@ export const failureMessages: Record<FailureCategory, string> = {
   EMAIL_NOT_VERIFIED: "The account email address is not verified.",
   INTEGRATION_UNAVAILABLE: "The integration was deleted or disabled.",
   CONFIGURATION_ERROR: "Notification delivery is not configured correctly.",
+  SUBSCRIPTION_INACTIVE: "The subscription is no longer active.",
   UNKNOWN: "The notification could not be delivered.",
 };

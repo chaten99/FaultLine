@@ -1,6 +1,7 @@
 import { logger } from "../../config/logger.js";
 import { processOutboxBatch } from "./notification-dispatcher.service.js";
 import { recoverStaleDeliveries } from "./notification-delivery.service.js";
+import { recoverStaleSubscriberDeliveries } from "../status-pages/status-page-delivery.service.js";
 import { reconcileIncidentEvents } from "./notification-outbox.service.js";
 
 export const runNotificationMaintenance = async (): Promise<void> => {
@@ -8,6 +9,7 @@ export const runNotificationMaintenance = async (): Promise<void> => {
     ["reconcile incident events", () => reconcileIncidentEvents()],
     ["dispatch outbox", () => processOutboxBatch()],
     ["recover stale deliveries", () => recoverStaleDeliveries()],
+    ["recover stale subscriber deliveries", () => recoverStaleSubscriberDeliveries()],
   ];
   for (const [name, step] of steps) {
     try {

@@ -1,0 +1,11 @@
+<%
+const body = `
+  <p style="margin:0 0 12px;"><span style="display:inline-block;padding:3px 10px;background:#171717;color:#ffffff;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">${e(statusLabel)}</span></p>
+  <h1 style="margin:0 0 16px;font-size:26px;line-height:1.25;">${e(heading)}</h1>
+  <p style="margin:0 0 24px;color:#525252;">${e(intro)}</p>
+  ${include("../notifications/_details.ejs", { rows })}
+  <p style="margin:0 0 24px;"><a href="${e(statusUrl)}" style="display:inline-block;padding:12px 22px;background:#171717;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;">View status page</a></p>
+  <p style="margin:0;color:#737373;font-size:13px;">You are receiving this because you subscribed to updates from ${e(pageName)}. <a href="${e(unsubscribeUrl)}" style="color:#525252;">Unsubscribe</a> at any time.</p>
+`;
+%>
+<%- include("../layouts/email-layout.ejs", { subject, body, footer }) %>

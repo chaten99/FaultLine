@@ -14,7 +14,10 @@ import {
   getResponseTimes,
 } from "../src/modules/analytics/analytics.service.js";
 
-const uri = process.env.ANALYTICS_TEST_MONGODB_URI;
+const baseUri = process.env.ANALYTICS_TEST_MONGODB_URI;
+const uri = baseUri
+  ? `${baseUri.slice(0, baseUri.lastIndexOf("/") + 1)}faultline_analytics_integration`
+  : undefined;
 const T0 = Date.UTC(2026, 0, 1, 0, 0, 0);
 const M = 60_000;
 const H = 60 * M;

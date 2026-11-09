@@ -11,6 +11,8 @@ import {
   publishDeliveryUpdate,
 } from "./notification-delivery.service.js";
 import type { ChannelType, IncidentEventType } from "./notification.types.js";
+import { dispatchSubscriberNotifications } from "../status-pages/status-page-delivery.service.js";
+import { publishPublicIncidentUpdates } from "../status-pages/status-page-realtime.service.js";
 
 const claimWindowMs = 60_000;
 
@@ -106,6 +108,13 @@ export const dispatchOutboxEntry = async (outbox: INotificationOutbox): Promise<
     }
     dispatched += 1;
   }
+  dispatched += await dispatchSubscriberNotifications(outbox);
+  await publishPublicIncidentUpdates({
+    ownerId: String(outbox.userId),
+    monitorId: outbox.snapshot.monitorId,
+    incidentId: outbox.snapshot.incidentId,
+    eventType: outbox.type,
+  });
   return dispatched;
 };
 
