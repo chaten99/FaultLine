@@ -6,12 +6,20 @@ import { createAccessToken } from "../src/modules/auth/auth-token.service.js";
 import { Monitor } from "../src/modules/monitors/monitor.model.js";
 import { MonitorCheck } from "../src/modules/checks/monitor-check.model.js";
 import * as redisService from "../src/lib/redis/redis.service.js";
+import * as lifecycleService from "../src/modules/monitors/monitor-lifecycle.service.js";
 
 vi.mock("../src/queues/monitor-scheduler.service.js", () => ({
   scheduleMonitor: vi.fn().mockResolvedValue(undefined),
   unscheduleMonitor: vi.fn().mockResolvedValue(undefined),
   enqueueImmediateCheck: vi.fn().mockResolvedValue("mock-run-id-12345"),
   reconcileSchedulers: vi.fn().mockResolvedValue({ added: 0, removed: 0, updated: 0 }),
+}));
+
+vi.mock("../src/modules/monitors/monitor-lifecycle.service.js", () => ({
+  recordMonitorCreated: vi.fn().mockResolvedValue(undefined),
+  recordMonitorActiveChange: vi.fn().mockResolvedValue(undefined),
+  deleteMonitorLifecycle: vi.fn().mockResolvedValue(undefined),
+  ensureLifecycleBaselines: vi.fn().mockResolvedValue(0),
 }));
 
 vi.mock("../src/lib/redis/redis.service.js", () => ({
@@ -436,6 +444,13 @@ describe("Monitor API Integration Tests", () => {
       .expect(200);
 
     expect(resumeRes.body.active).toBe(true);
+
+    expect(lifecycleService.recordMonitorCreated).toHaveBeenCalled();
+    const changes = vi.mocked(lifecycleService.recordMonitorActiveChange).mock.calls;
+    expect(changes.slice(-2).map(([monitor, previous]) => [monitor.active, previous])).toEqual([
+      [false, true],
+      [true, false],
+    ]);
 
     await request(app)
       .delete(`/api/monitors/${monitorId}`)

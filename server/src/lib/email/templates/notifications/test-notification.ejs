@@ -1,0 +1,8 @@
+<%
+const body = `
+  <p style="margin:0 0 12px;"><span style="display:inline-block;padding:3px 10px;border:1px solid #171717;color:#171717;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">Test</span></p>
+  <h1 style="margin:0 0 16px;font-size:26px;line-height:1.25;">Test notification</h1>
+  <p style="margin:0 0 24px;color:#525252;">This is a test message from FaultLine. If you can read it, email alerts for ${e(recipient)} are working. No incident was created and no monitor was affected.</p>
+`;
+%>
+<%- include("../layouts/email-layout.ejs", { subject, body, footer }) %>

@@ -2,10 +2,15 @@ import request from "supertest";
 import mongoose from "mongoose";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { app } from "../src/app.js";
+import { recordIncidentNotificationEvent } from "../src/modules/notifications/notification-outbox.service.js";
 import { createAccessToken } from "../src/modules/auth/auth-token.service.js";
 import { Incident } from "../src/modules/incidents/incident.model.js";
 import { IncidentTimeline } from "../src/modules/incidents/incident-timeline.model.js";
 import { Monitor } from "../src/modules/monitors/monitor.model.js";
+
+vi.mock("../src/modules/notifications/notification-outbox.service.js", () => ({
+  recordIncidentNotificationEvent: vi.fn().mockResolvedValue(undefined),
+}));
 
 vi.mock("../src/lib/redis/redis.service.js", () => ({
   acquireLock: vi.fn().mockResolvedValue(true),
@@ -318,6 +323,7 @@ describe("Incident API Integration Tests", () => {
 
     expect(ackRes.body.status).toBe("acknowledged");
     expect(ackRes.body.acknowledgedAt).toBeDefined();
+    expect(recordIncidentNotificationEvent).toHaveBeenCalledWith("incident.acknowledged", incId);
 
     const ackAgainRes = await request(app)
       .post(`/api/incidents/${incId}/acknowledge`)
@@ -336,6 +342,7 @@ describe("Incident API Integration Tests", () => {
     expect(resolveRes.body.resolutionType).toBe("manual");
     expect(resolveRes.body.resolutionReason).toBe("Database rebooted and healthy");
     expect(resolveRes.body.durationMs).toBeGreaterThanOrEqual(0);
+    expect(recordIncidentNotificationEvent).toHaveBeenCalledWith("incident.resolved", incId);
 
     const mon = monitorsStore.find((m) => m._id === monId);
     expect(mon?.activeIncidentId).toBeNull();
@@ -347,6 +354,7 @@ describe("Incident API Integration Tests", () => {
       .expect(400);
 
     expect(resolveAgainRes.body.code).toBe("INCIDENT_ALREADY_RESOLVED");
+    expect(recordIncidentNotificationEvent).toHaveBeenCalledTimes(2);
 
     const ackAfterResolve = await request(app)
       .post(`/api/incidents/${incId}/acknowledge`)

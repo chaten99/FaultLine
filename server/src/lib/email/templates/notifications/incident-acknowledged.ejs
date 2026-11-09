@@ -1,0 +1,11 @@
+<%
+const body = `
+  <p style="margin:0 0 12px;"><span style="display:inline-block;padding:3px 10px;background:#525252;color:#ffffff;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">${e(statusLabel)}</span></p>
+  <h1 style="margin:0 0 16px;font-size:26px;line-height:1.25;">Incident acknowledged: ${e(monitorName)}</h1>
+  <p style="margin:0 0 24px;color:#525252;">${e(acknowledgedBy)} acknowledged the incident on <strong>${e(monitorName)}</strong>. The incident remains active until the monitor recovers or the incident is resolved.</p>
+  ${include("_details.ejs", { rows })}
+  ${include("_action.ejs", { url: incidentUrl })}
+  <p style="margin:0;color:#737373;font-size:13px;">You are receiving this because acknowledgement alerts are enabled for your FaultLine account.</p>
+`;
+%>
+<%- include("../layouts/email-layout.ejs", { subject, body, footer }) %>
