@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   mergeIncidentIntoList,
@@ -12,16 +12,31 @@ import type {
   PublicStatusPayload,
   StatusBlock,
 } from "../types/status-page.types";
+import { nextConnectionState, type ConnectionState } from "../lib/public-motion";
 import { disconnectPublicSocket, getPublicSocket } from "./public-socket";
 
-export const usePublicStatusSocket = (slug: string, onUnpublished: () => void, enabled = true) => {
+export const usePublicStatusSocket = (
+  slug: string,
+  onUnpublished: () => void,
+  enabled = true,
+): ConnectionState => {
   const queryClient = useQueryClient();
+  const [connection, setConnection] = useState<ConnectionState>("offline");
 
   useEffect(() => {
     if (!enabled || !slug) return;
     const socket = getPublicSocket();
     let cancelled = false;
     let hasConnectedBefore = false;
+    let everConnected = false;
+
+    const onConnect = () => {
+      everConnected = true;
+      setConnection(nextConnectionState("connect", true));
+      subscribeToPage();
+    };
+    const onDisconnect = () => setConnection(nextConnectionState("disconnect", everConnected));
+    const onConnectError = () => setConnection(nextConnectionState("error", everConnected));
 
     const subscribeToPage = () => {
       socket.emit("subscribe", { slug }, (ack?: { ok?: boolean }) => {
@@ -60,7 +75,9 @@ export const usePublicStatusSocket = (slug: string, onUnpublished: () => void, e
       onUnpublished();
     };
 
-    socket.on("connect", subscribeToPage);
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+    socket.on("connect_error", onConnectError);
     socket.on("public.status.updated", onStatus);
     socket.on("public.incident.created", onIncident);
     socket.on("public.incident.updated", onIncident);
@@ -70,7 +87,9 @@ export const usePublicStatusSocket = (slug: string, onUnpublished: () => void, e
 
     return () => {
       cancelled = true;
-      socket.off("connect", subscribeToPage);
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+      socket.off("connect_error", onConnectError);
       socket.off("public.status.updated", onStatus);
       socket.off("public.incident.created", onIncident);
       socket.off("public.incident.updated", onIncident);
@@ -79,4 +98,6 @@ export const usePublicStatusSocket = (slug: string, onUnpublished: () => void, e
       disconnectPublicSocket();
     };
   }, [enabled, onUnpublished, queryClient, slug]);
+
+  return enabled ? connection : "offline";
 };

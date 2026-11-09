@@ -128,3 +128,17 @@ export const formatDate = (value: string | null | undefined): string => {
   if (Number.isNaN(date.getTime())) return "—";
   return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 };
+
+export const toneSolid: Record<Tone, string> = {
+  good: "bg-emerald-600",
+  warn: "bg-amber-500",
+  bad: "bg-red-600",
+  neutral: "bg-slate-400",
+};
+
+export const toneRing: Record<Tone, string> = {
+  good: "text-emerald-600",
+  warn: "text-amber-600",
+  bad: "text-red-600",
+  neutral: "text-slate-500",
+};

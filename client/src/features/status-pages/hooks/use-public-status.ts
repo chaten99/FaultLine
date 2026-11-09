@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import {
   confirmUnsubscribe,
   getPublicHistory,
@@ -41,11 +41,13 @@ export const usePastIncidents = (slug: string, enabled: boolean) =>
     staleTime: 60_000,
   });
 
-export const usePublicHistory = (slug: string, range: HistoryRange) =>
+export const usePublicHistory = (slug: string, range: HistoryRange, enabled = true) =>
   useQuery({
     queryKey: publicKeys.history(slug, range),
     queryFn: async () => (await getPublicHistory(slug, range)).data,
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
+    enabled,
   });
 
 export const useSubscribe = (slug: string) =>

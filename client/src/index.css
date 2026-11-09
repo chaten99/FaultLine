@@ -301,3 +301,281 @@ body {
     transition-duration: 1ms !important;
   }
 }
+
+.ps-root {
+  --ps-ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes psFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes psFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes psRing {
+  0% {
+    transform: scale(1);
+    opacity: 0.45;
+  }
+  100% {
+    transform: scale(1.85);
+    opacity: 0;
+  }
+}
+
+@keyframes psDot {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.55);
+    opacity: 0.5;
+  }
+}
+
+@keyframes psShimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes psBarIn {
+  from {
+    opacity: 0;
+    transform: scaleY(0.25);
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+@keyframes psFlash {
+  0% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes psSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes psDraw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes psPop {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.ps-fade-up {
+  animation: psFadeUp 480ms var(--ps-ease) both;
+  animation-delay: var(--ps-delay, 0ms);
+}
+
+.ps-fade {
+  animation: psFade 320ms ease-out both;
+}
+
+.ps-pop {
+  animation: psPop 420ms var(--ps-ease) both;
+}
+
+.ps-slide-in {
+  animation: psSlideIn 420ms var(--ps-ease) both;
+}
+
+.ps-ring {
+  position: relative;
+}
+
+.ps-ring::before,
+.ps-ring::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 2px solid currentColor;
+  opacity: 0;
+  animation: psRing var(--ps-ring-speed, 2.8s) var(--ps-ease) infinite;
+}
+
+.ps-ring::after {
+  animation-delay: calc(var(--ps-ring-speed, 2.8s) / 2);
+}
+
+.ps-ring-alert {
+  --ps-ring-speed: 1.6s;
+}
+
+.ps-ring-idle {
+  --ps-ring-speed: 3.6s;
+}
+
+.ps-dot-alert {
+  animation: psDot 1.4s ease-in-out infinite;
+}
+
+.ps-shimmer {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.5rem;
+  background: var(--muted);
+}
+
+.ps-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklch, var(--background) 75%, transparent),
+    transparent
+  );
+  animation: psShimmer 1.4s ease-in-out infinite;
+}
+
+.ps-bar {
+  transform-origin: bottom;
+  animation: psBarIn 420ms var(--ps-ease) both;
+  animation-delay: var(--ps-delay, 0ms);
+  transition: filter 150ms ease;
+}
+
+.ps-bar[data-active="true"] {
+  filter: brightness(0.8);
+}
+
+.ps-expand {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 320ms var(--ps-ease),
+    opacity 240ms ease;
+}
+
+.ps-expand[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.ps-expand-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ps-flash::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  border: 2px solid var(--ps-flash-color, currentColor);
+  opacity: 0;
+  pointer-events: none;
+  animation: psFlash 1.6s ease-out both;
+}
+
+.ps-draw {
+  stroke-dasharray: 32;
+  stroke-dashoffset: 32;
+  animation: psDraw 480ms var(--ps-ease) 160ms forwards;
+}
+
+.ps-tab-indicator {
+  transition: transform 320ms var(--ps-ease);
+}
+
+.ps-topbar {
+  transition:
+    box-shadow 200ms ease,
+    background-color 200ms ease,
+    border-color 200ms ease;
+}
+
+.ps-card {
+  transition:
+    transform 220ms var(--ps-ease),
+    box-shadow 220ms ease,
+    border-color 220ms ease;
+}
+
+@media (hover: hover) {
+  .ps-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px -12px rgb(0 0 0 / 0.18);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ps-fade-up,
+  .ps-fade,
+  .ps-pop,
+  .ps-slide-in,
+  .ps-bar,
+  .ps-dot-alert,
+  .ps-flash::after,
+  .ps-draw,
+  .ps-shimmer::after {
+    animation: none !important;
+  }
+
+  .ps-draw {
+    stroke-dashoffset: 0;
+  }
+
+  .ps-ring::before,
+  .ps-ring::after,
+  .ps-shimmer::after {
+    display: none;
+  }
+
+  .ps-expand,
+  .ps-tab-indicator,
+  .ps-card,
+  .ps-topbar,
+  .ps-bar {
+    transition: none !important;
+  }
+
+  .ps-card:hover {
+    transform: none;
+  }
+}
