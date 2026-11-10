@@ -45,3 +45,21 @@ export const loginSchema = z.object({
     .max(254),
   password: z.string().min(1, "Please enter your password.").max(128),
 });
+
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, "Enter your current password.").max(128),
+    newPassword: z.string().min(8, "Password must be at least 8 characters.").max(128),
+    confirmPassword: z.string().min(1, "Please confirm your new password."),
+  })
+  .strict()
+  .refine((value) => value.newPassword === value.confirmPassword, {
+    path: ["confirmPassword"],
+    message: "Passwords do not match.",
+  })
+  .refine((value) => value.newPassword !== value.currentPassword, {
+    path: ["newPassword"],
+    message: "Choose a password different from your current one.",
+  });
+
+export const sessionIdSchema = z.object({ id: z.string().uuid("Invalid session id.") });

@@ -10,6 +10,7 @@ import {
 import type { AuthResult, SafeUser } from "./auth.types.js";
 import { createApiError } from "../../lib/errors/create-api-error.js";
 import { startLoginVerification } from "./otp.service.js";
+import { revokeOtherSessions } from "./session.service.js";
 
 const toSafeUser = (user: { _id: unknown; name: string; email: string }): SafeUser => ({
   id: String(user._id),
@@ -118,3 +119,21 @@ const isDuplicateEmailError = (error: unknown): boolean =>
   typeof error.keyPattern === "object" &&
   error.keyPattern !== null &&
   "email" in error.keyPattern;
+
+export const changePassword = async (
+  userId: string,
+  input: { currentPassword: string; newPassword: string },
+  currentFamilyId: string | null,
+) => {
+  const user = await User.findById(userId).select("+passwordHash");
+  if (!user) throw createApiError("Authentication required.", 401, "AUTHENTICATION_REQUIRED");
+  if (!(await argon2.verify(user.passwordHash, input.currentPassword))) {
+    throw createApiError("Current password is incorrect.", 400, "INVALID_CURRENT_PASSWORD", {
+      currentPassword: "Current password is incorrect.",
+    });
+  }
+  const passwordHash = await argon2.hash(input.newPassword, { type: argon2.argon2id });
+  await User.updateOne({ _id: user._id }, { $set: { passwordHash } });
+  const { revoked } = await revokeOtherSessions(userId, currentFamilyId);
+  return { status: "ok" as const, revokedSessions: revoked };
+};

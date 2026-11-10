@@ -36,7 +36,9 @@ export type ApiErrorCode =
   | "DELIVERY_NOT_RETRYABLE"
   | "INVALID_INTEGRATION_URL"
   | "INVALID_RANGE"
-  | "EXPORT_TOO_LARGE";
+  | "EXPORT_TOO_LARGE"
+  | "INVALID_CURRENT_PASSWORD"
+  | "SESSION_NOT_FOUND";
 
 export type ApiError = Error & {
   statusCode: number;

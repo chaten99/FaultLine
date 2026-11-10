@@ -7,6 +7,8 @@ const refreshTokenFamilySchema = new Schema(
     tokenHash: { type: String, required: true },
     expiresAt: { type: Date, required: true, index: true },
     revokedAt: { type: Date, default: null },
+    userAgent: { type: String, maxlength: 256 },
+    lastUsedAt: { type: Date },
   },
   { timestamps: true },
 );

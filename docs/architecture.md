@@ -105,3 +105,11 @@ Analytics are computed on demand with indexed MongoDB aggregations over the exis
 1. Run `npm test --workspace server`; calculation tests use fixed timestamps.
 2. Start MongoDB (for example `docker run --rm -p 27018:27017 mongo:8`) and run `ANALYTICS_TEST_MONGODB_URI=mongodb://127.0.0.1:27018/faultline_test npm test --workspace server -- analytics.integration` to check the real aggregations against independently computed values.
 3. Create a monitor, let it run, pause and resume it, then compare `/analytics` with the Monitor Details history.
+
+## Profile and Sessions
+
+Authenticated users manage their account at `/profile`.
+
+- `GET /api/profile` returns the account (name, email, verification state, member-since date) and live counts of monitors, active monitors, open incidents and status pages. `PATCH /api/profile` updates the display name only (2 to 80 characters, no markup). Email changes are not supported.
+- `POST /api/auth/password` changes the password after verifying the current one with argon2, rejects reuse of the current password, is limited to 5 attempts per 15 minutes, and signs out every other device while keeping the current session.
+- `GET /api/auth/sessions`, `DELETE /api/auth/sessions/:id` and `POST /api/auth/sessions/revoke-others` list and revoke refresh-token sessions. These live under `/api/auth` because the refresh cookie is scoped to that path, which is how the server tells which listed session is the current one. Each session records its last use and a browser and operating system label derived from the user agent; raw user agents, IP addresses and token hashes are never returned. Revoking the current session clears the cookie.
