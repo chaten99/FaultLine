@@ -1,0 +1,8 @@
+<%
+const body = `
+  <h1 style="margin:0 0 16px;font-size:26px;line-height:1.25;">You have been unsubscribed</h1>
+  <p style="margin:0 0 16px;color:#525252;">You will no longer receive incident updates from <strong>${e(pageName)}</strong> at this address.</p>
+  <p style="margin:0;color:#737373;font-size:13px;">Changed your mind? You can subscribe again from the status page at any time: <a href="${e(statusUrl)}" style="color:#525252;">${e(statusUrl)}</a></p>
+`;
+%>
+<%- include("../layouts/email-layout.ejs", { subject, body, footer }) %>

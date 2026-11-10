@@ -36,6 +36,10 @@ const environmentSchema = z.object({
   CHECK_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
   MONITOR_QUEUE_NAME: z.string().min(1).default("faultline-monitor-checks"),
   RECONCILIATION_INTERVAL_SECONDS: z.coerce.number().int().min(60).max(86400).default(300),
+  STATUS_PAGE_TOKEN_SECRET: z
+    .string()
+    .min(32)
+    .default("development-status-page-token-secret-change-me-123456"),
   NOTIFICATION_ENCRYPTION_KEY: z.preprocess(
     (value) => (value === "" ? undefined : value),
     z

@@ -16,7 +16,14 @@ import { MonitorDetailsPage } from "@/features/monitors/pages/monitor-details-pa
 import { IncidentsPage } from "@/features/incidents/pages/incidents-page";
 import { AnalyticsPage } from "@/features/analytics/pages/analytics-page";
 import { IncidentDetailsPage } from "@/features/incidents/pages/incident-details-page";
+import { StatusPagesPage } from "@/features/status-pages/pages/status-pages-page";
+import { StatusPageEditorPage } from "@/features/status-pages/pages/status-page-editor-page";
+import { StatusPagePreviewPage } from "@/features/status-pages/pages/status-page-preview-page";
+import { PublicStatusPage } from "@/features/status-pages/pages/public-status-page";
+import { PublicConfirmPage } from "@/features/status-pages/pages/public-confirm-page";
+import { PublicUnsubscribePage } from "@/features/status-pages/pages/public-unsubscribe-page";
 import { NotificationsPage } from "@/features/notifications/pages/notifications-page";
+import { ProfilePage } from "@/features/profile/pages/profile-page";
 
 export default function App() {
   const [queryClient] = useState(
@@ -31,6 +38,8 @@ export default function App() {
       }),
   );
 
+  const location = useLocation();
+  const isPublicStatusRoute = location.pathname.startsWith("/status/");
   const status = useAuthStore((state) => state.status);
   const setSession = useAuthStore((state) => state.setSession);
   const clearSession = useAuthStore((state) => state.clearSession);
@@ -41,12 +50,15 @@ export default function App() {
       .catch(() => clearSession());
   }, [clearSession, setSession]);
 
-  if (status === "loading") return <PageLoader />;
+  if (status === "loading" && !isPublicStatusRoute) return <PageLoader />;
 
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider delayDuration={350}>
         <Routes>
+          <Route path="/status/:slug" element={<PublicStatusPage />} />
+          <Route path="/status/:slug/confirm" element={<PublicConfirmPage />} />
+          <Route path="/status/:slug/unsubscribe" element={<PublicUnsubscribePage />} />
           <Route
             path="/forgot-password"
             element={
@@ -128,10 +140,42 @@ export default function App() {
             }
           />
           <Route
+            path="/profile"
+            element={
+              <ProtectedRoute>
+                <ProfilePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/analytics"
             element={
               <ProtectedRoute>
                 <AnalyticsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/status-pages"
+            element={
+              <ProtectedRoute>
+                <StatusPagesPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/status-pages/:id/edit"
+            element={
+              <ProtectedRoute>
+                <StatusPageEditorPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/status-pages/:id/preview"
+            element={
+              <ProtectedRoute>
+                <StatusPagePreviewPage />
               </ProtectedRoute>
             }
           />
