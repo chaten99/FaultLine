@@ -45,6 +45,8 @@ export type ApiErrorCode =
   | "SERVICE_LIMIT_REACHED"
   | "INVALID_MONITOR_SELECTION"
   | "INVALID_TOKEN";
+  | "INVALID_CURRENT_PASSWORD"
+  | "SESSION_NOT_FOUND";
 
 export type ApiError = Error & {
   statusCode: number;

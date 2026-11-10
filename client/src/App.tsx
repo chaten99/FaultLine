@@ -23,6 +23,7 @@ import { PublicStatusPage } from "@/features/status-pages/pages/public-status-pa
 import { PublicConfirmPage } from "@/features/status-pages/pages/public-confirm-page";
 import { PublicUnsubscribePage } from "@/features/status-pages/pages/public-unsubscribe-page";
 import { NotificationsPage } from "@/features/notifications/pages/notifications-page";
+import { ProfilePage } from "@/features/profile/pages/profile-page";
 
 export default function App() {
   const [queryClient] = useState(
@@ -135,6 +136,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <NotificationsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/profile"
+            element={
+              <ProtectedRoute>
+                <ProfilePage />
               </ProtectedRoute>
             }
           />

@@ -13,14 +13,15 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { disconnectMonitorSocket } from "@/features/monitors/realtime/monitor-socket";
+import { UserMenu } from "@/features/profile/components/user-menu";
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
+  const [signOutOpen, setSignOutOpen] = useState(false);
   const user = useAuthStore((state) => state.user);
   const clearSession = useAuthStore((state) => state.clearSession);
   const navigate = useNavigate();
@@ -138,6 +139,20 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             Settings
           </p>
           <NavLink
+            to="/profile"
+            onClick={() => setOpen(false)}
+            className={({ isActive }) =>
+              cn(
+                "block rounded-md px-3 py-2.5 text-sm font-medium transition-all duration-150",
+                isActive
+                  ? "bg-accent text-accent-foreground shadow-xs"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+              )
+            }
+          >
+            Profile
+          </NavLink>
+          <NavLink
             to="/settings/notifications"
             onClick={() => setOpen(false)}
             className={({ isActive }) =>
@@ -153,26 +168,28 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           </NavLink>
         </nav>
 
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <button className="absolute bottom-6 left-5 flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground">
-              <LogOut size={16} /> Sign out
-            </button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Sign out of FaultLine?</AlertDialogTitle>
-              <AlertDialogDescription>
-                You can sign back in whenever you're ready. Your current session will be closed.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={() => void signOut()}>Sign out</AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <button
+          className="absolute bottom-6 left-5 flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
+          onClick={() => setSignOutOpen(true)}
+        >
+          <LogOut size={16} /> Sign out
+        </button>
       </aside>
+
+      <AlertDialog open={signOutOpen} onOpenChange={setSignOutOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Sign out of FaultLine?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You can sign back in whenever you're ready. Your current session will be closed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void signOut()}>Sign out</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <button
         className="nav-overlay fixed inset-0 z-20 bg-foreground/30 backdrop-blur-[2px] lg:hidden"
@@ -197,11 +214,8 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             </TooltipTrigger>
             <TooltipContent>Open navigation</TooltipContent>
           </Tooltip>
-          <div className="ml-auto flex items-center gap-3 text-sm text-muted-foreground">
-            <span>{user?.name}</span>
-            <div className="grid size-8 place-items-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
-              {user?.name?.slice(0, 1).toUpperCase() ?? "U"}
-            </div>
+          <div className="ml-auto">
+            <UserMenu user={user} onSignOut={() => setSignOutOpen(true)} />
           </div>
         </header>
 

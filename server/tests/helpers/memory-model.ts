@@ -36,6 +36,7 @@ const comparable = (value: unknown): unknown => {
 };
 
 const matchesCondition = (actual: unknown, condition: unknown): boolean => {
+  if (condition === null) return actual === undefined || actual === null;
   if (
     condition !== null &&
     typeof condition === "object" &&
@@ -328,7 +329,16 @@ export const bindMemoryModel = (model: unknown, options: MemoryModelOptions = {}
     }),
   );
 
+  const updateMany = vi.fn((filter: Filter, update: Record<string, unknown>) =>
+    query(() => {
+      const targets = docs.filter((doc) => matches(doc, filter));
+      for (const doc of targets) applyUpdate(doc, update, false);
+      return { matchedCount: targets.length, modifiedCount: targets.length };
+    }),
+  );
+
   Object.assign(target, {
+    updateMany,
     deleteMany,
     find,
     findOne,

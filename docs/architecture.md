@@ -134,3 +134,10 @@ Notifications reuse the existing incident outbox: when an incident event is disp
 Visitors connect to the `/public` Socket.IO namespace without authentication and emit `subscribe` with `{ slug }`; the server joins them to a room only if the page is published. Events `public.status.updated`, `public.incident.created`, `public.incident.updated`, `public.incident.resolved` and `public.page.unpublished` are published after incident changes are persisted, to that page's room only; the user-scoped rooms never receive them. On unpublish or delete, sockets are removed from the room. Clients load an HTTP snapshot first and resynchronize once after reconnecting.
 
 `app.set("trust proxy", ...)` trusts private-range proxies so per-IP limits see the visitor address behind nginx.
+## Profile and Sessions
+
+Authenticated users manage their account at `/profile`.
+
+- `GET /api/profile` returns the account (name, email, verification state, member-since date) and live counts of monitors, active monitors, open incidents and status pages. `PATCH /api/profile` updates the display name only (2 to 80 characters, no markup). Email changes are not supported.
+- `POST /api/auth/password` changes the password after verifying the current one with argon2, rejects reuse of the current password, is limited to 5 attempts per 15 minutes, and signs out every other device while keeping the current session.
+- `GET /api/auth/sessions`, `DELETE /api/auth/sessions/:id` and `POST /api/auth/sessions/revoke-others` list and revoke refresh-token sessions. These live under `/api/auth` because the refresh cookie is scoped to that path, which is how the server tells which listed session is the current one. Each session records its last use and a browser and operating system label derived from the user agent; raw user agents, IP addresses and token hashes are never returned. Revoking the current session clears the cookie.

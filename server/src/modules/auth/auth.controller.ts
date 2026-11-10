@@ -1,6 +1,8 @@
 import type { Request, Response } from "express";
 import { env } from "../../config/env.js";
 import {
+  changePasswordSchema,
+  sessionIdSchema,
   emailOtpSchema,
   emailSchema,
   loginSchema,
@@ -8,6 +10,7 @@ import {
   resetPasswordSchema,
 } from "./auth.validation.js";
 import {
+  changePassword,
   getUser,
   createSessionForUser,
   loginUser,
@@ -25,6 +28,13 @@ import {
   verifyResetOtp,
 } from "./otp.service.js";
 import type { AuthenticatedRequest } from "./auth.types.js";
+import {
+  currentFamilyId,
+  listSessions,
+  recordSessionMeta,
+  revokeOtherSessions,
+  revokeSession,
+} from "./session.service.js";
 
 const cookieOptions = () => ({
   httpOnly: true,
@@ -32,11 +42,13 @@ const cookieOptions = () => ({
   sameSite: "lax" as const,
   path: "/api/auth",
 });
-const sendAuth = (
+const sendAuth = async (
   response: Response,
   result: { accessToken: string; expiresIn: number; user: unknown; refreshToken: string },
+  request?: Request,
   status = 200,
 ) => {
+  await recordSessionMeta(result.refreshToken, request?.get("user-agent"));
   response.cookie("faultline_refresh", result.refreshToken, {
     ...cookieOptions(),
     maxAge: env.JWT_REFRESH_ABSOLUTE_TTL_DAYS * 86_400_000,
@@ -69,7 +81,7 @@ export const verifyEmail = async (request: Request, response: Response) => {
         code: "AUTHENTICATION_REQUIRED",
         message: "Authentication required",
       });
-    return sendAuth(response, await createSessionForUser(user));
+    return sendAuth(response, await createSessionForUser(user), request);
   }
   await verifyEmailOtp(input.email, input.code);
   return response.json({ status: "verified" });
@@ -125,6 +137,7 @@ export const login = async (request: Request, response: Response) =>
   sendAuth(
     response,
     await loginUser({ ...loginSchema.parse(request.body), ipAddress: request.ip ?? "unknown" }),
+    request,
   );
 export const refresh = async (request: Request, response: Response) => {
   const token = request.cookies.faultline_refresh as string | undefined;
@@ -134,7 +147,7 @@ export const refresh = async (request: Request, response: Response) => {
       code: "AUTHENTICATION_REQUIRED",
       message: "Your session has expired. Please sign in again.",
     });
-  return sendAuth(response, await refreshUser(token));
+  return sendAuth(response, await refreshUser(token), request);
 };
 export const me = async (request: Request, response: Response) => {
   const user = await getUser((request as AuthenticatedRequest).userId as string);
@@ -147,3 +160,30 @@ export const logout = async (request: Request, response: Response) => {
   response.clearCookie("faultline_refresh", cookieOptions());
   return response.status(204).send();
 };
+
+const sessionUser = (request: Request) => (request as AuthenticatedRequest).userId as string;
+const refreshCookie = (request: Request) =>
+  currentFamilyId(request.cookies.faultline_refresh as string | undefined);
+
+export const password = async (request: Request, response: Response) => {
+  const input = changePasswordSchema.parse(request.body);
+  return response.json(await changePassword(sessionUser(request), input, refreshCookie(request)));
+};
+
+export const sessions = async (request: Request, response: Response) => {
+  response.setHeader("Cache-Control", "private, no-store");
+  return response.json(await listSessions(sessionUser(request), refreshCookie(request)));
+};
+
+export const removeSession = async (request: Request, response: Response) => {
+  const { id } = sessionIdSchema.parse(request.params);
+  const result = await revokeSession(sessionUser(request), id, refreshCookie(request));
+  if (result.current) response.clearCookie("faultline_refresh", cookieOptions());
+  return response.json(result);
+};
+
+export const removeOtherSessions = async (request: Request, response: Response) =>
+  response.json({
+    status: "ok",
+    ...(await revokeOtherSessions(sessionUser(request), refreshCookie(request))),
+  });
