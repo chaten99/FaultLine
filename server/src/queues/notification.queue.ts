@@ -5,6 +5,7 @@ import { createRedisConnection } from "../lib/redis/redis.service.js";
 export type NotificationJobData = {
   deliveryId: string;
   generation: number;
+  kind?: "subscriber";
 };
 
 let queueInstance: Queue<NotificationJobData> | null = null;

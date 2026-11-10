@@ -50,7 +50,9 @@ const matchesCondition = (actual: unknown, condition: unknown): boolean => {
         case "$in":
           return (expected as unknown[]).some((item) => comparable(item) === left);
         case "$ne":
-          return left !== comparable(expected);
+          return expected === null
+            ? left !== undefined && left !== null
+            : left !== comparable(expected);
         case "$lt":
           return left !== undefined && (left as number) < (comparable(expected) as number);
         case "$lte":
@@ -116,6 +118,13 @@ type QueryResult<T> = Promise<T> & {
   limit: (count: number) => QueryResult<T>;
   select: (spec?: unknown) => QueryResult<T>;
   lean: () => QueryResult<T>;
+};
+
+const replaceDoc = (target: Doc, source: Doc) => {
+  for (const key of Object.keys(target)) {
+    if (!(key in source)) delete target[key];
+  }
+  Object.assign(target, source);
 };
 
 const clone = <T>(value: T): T => {
@@ -242,7 +251,10 @@ export const bindMemoryModel = (model: unknown, options: MemoryModelOptions = {}
       query(() => {
         const existing = docs.find((doc) => matches(doc, filter));
         if (existing) {
-          applyUpdate(existing, update, false);
+          const draft = clone(existing);
+          applyUpdate(draft, update, false);
+          assertUnique(draft, existing);
+          replaceDoc(existing, draft);
           return { matchedCount: 1, modifiedCount: 1, upsertedCount: 0 };
         }
         if (opts.upsert) {
@@ -290,7 +302,10 @@ export const bindMemoryModel = (model: unknown, options: MemoryModelOptions = {}
         }
         if (!existing) return null;
         const before = clone(existing);
-        applyUpdate(existing, update, false);
+        const draft = clone(existing);
+        applyUpdate(draft, update, false);
+        assertUnique(draft, existing);
+        replaceDoc(existing, draft);
         return opts.new ? clone(existing) : before;
       }),
   );

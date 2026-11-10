@@ -106,6 +106,34 @@ Analytics are computed on demand with indexed MongoDB aggregations over the exis
 2. Start MongoDB (for example `docker run --rm -p 27018:27017 mongo:8`) and run `ANALYTICS_TEST_MONGODB_URI=mongodb://127.0.0.1:27018/faultline_test npm test --workspace server -- analytics.integration` to check the real aggregations against independently computed values.
 3. Create a monitor, let it run, pause and resume it, then compare `/analytics` with the Monitor Details history.
 
+## Public Status Pages
+
+Owners publish branded status pages at `/status/:slug`, built from services (groups of their own monitors). Public data is always derived from the existing monitor, check and incident records; nothing is stored separately or invented.
+
+### Models and API
+
+- `PublicStatusPage` (owner, name, globally unique `slug`, description, branding, `draft | published | unpublished`, subscriber settings), `StatusPageService` (page, ordered, enabled, `monitorIds`), `StatusPageSubscriber` and `StatusPageDelivery` (subscriber email deliveries).
+- Authenticated management API under `/api/status-pages`: pages (CRUD, publish, unpublish, `slug-available`), services (CRUD and `reorder`), `monitor-options`, `preview`, `subscribers` (masked addresses and counts) and `analytics`. Every operation checks page ownership, and every monitor id in a service is verified to belong to the owner server-side. Publishing requires at least one enabled service with a monitor.
+- Unauthenticated public API under `/api/public/status-pages/:slug`: `GET /` (status and active incidents), `/incidents` (paginated), `/history?range=24h|7d|30d|90d`, and the subscription endpoints. Responses are built by explicit serializers: no owner or monitor ids, monitor names, URLs, failure details, internal incident notes or subscriber data. Draft, unpublished, deleted and unknown slugs all return the same 404.
+- Public GET responses use `Cache-Control: no-cache` with ETags, so browsers revalidate on every request: unpublishing or deleting takes effect immediately. A 10 second server-side snapshot cache and a 60 second history cache are cleared on every page, service, publish and unpublish change, and publication state is always read from the database. Subscription, preview and management responses are never cached.
+
+### Public status rules
+
+A monitor is `paused` if inactive; `down` if it has an open or acknowledged incident; `operational` if its most recent eligible check succeeded within `2 x interval + grace` (grace is the larger of 30 seconds and half the interval); otherwise `unknown`. A failed latest check without an incident is not reported as operational or as an outage. A service ignores paused monitors: it is `major_outage` if all remaining monitors are down, `partial_outage` if some are, `operational` only if all are operational, and `unknown` otherwise (including when nothing is active). The page status is the worst enabled service (`major_outage`, then `partial_outage`, then `unknown` unless every service is operational). Disabled services are not shown. Public incidents use generic titles built from service names and only persisted timestamps.
+
+Uptime history reuses the analytics availability calculation (same definitions for downtime, unknown and paused time) scoped to the service's monitors; insufficient data is reported as such.
+
+### Subscribers
+
+Visitors enter an email and choose events (opened and resolved by default; acknowledged only when the owner offers it). A single-use, 32-byte random confirmation token is emailed and only its SHA-256 digest is stored; it expires after 24 hours and a new request invalidates the previous one. Requests are limited per IP and per address (3 per hour), re-sends have a 60 second cooldown, and responses are identical whether or not an address is already known. Nobody is subscribed until they confirm. Unsubscribe links use an HMAC (`STATUS_PAGE_TOKEN_SECRET`) over the page and subscriber, so every notification can carry one without storing raw tokens; the page asks for explicit confirmation (GET only validates), and unsubscribing works even after a page is unpublished.
+
+Notifications reuse the existing incident outbox: when an incident event is dispatched, active, matching subscribers of published pages that include the monitor get a `StatusPageDelivery` (unique per event and subscriber), processed on the shared BullMQ notification queue with the same retry and backoff rules. Consent, preferences and page state are re-checked at send time, so unsubscribing stops delivery even for queued jobs. Subscriber emails use the existing Resend client, EJS layout and plain-text alternatives, include `List-Unsubscribe`, and never contain internal monitor names or error details. Owner email, Slack and webhook alerts are unaffected.
+
+### Realtime
+
+Visitors connect to the `/public` Socket.IO namespace without authentication and emit `subscribe` with `{ slug }`; the server joins them to a room only if the page is published. Events `public.status.updated`, `public.incident.created`, `public.incident.updated`, `public.incident.resolved` and `public.page.unpublished` are published after incident changes are persisted, to that page's room only; the user-scoped rooms never receive them. On unpublish or delete, sockets are removed from the room. Clients load an HTTP snapshot first and resynchronize once after reconnecting.
+
+`app.set("trust proxy", ...)` trusts private-range proxies so per-IP limits see the visitor address behind nginx.
 ## Profile and Sessions
 
 Authenticated users manage their account at `/profile`.

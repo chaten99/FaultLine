@@ -44,6 +44,7 @@ export type NotificationEmail = {
   subject: string;
   html: string;
   text: string;
+  headers?: Record<string, string>;
 };
 
 export const sendNotificationEmail = async (message: NotificationEmail): Promise<ChannelResult> => {
@@ -68,6 +69,7 @@ export const sendNotificationEmail = async (message: NotificationEmail): Promise
       subject: message.subject,
       text: message.text,
       html: message.html,
+      ...(message.headers ? { headers: message.headers } : {}),
     });
     if (!error) return { ok: true, responseCode: 200, durationMs: elapsed() };
     const statusCode = typeof error.statusCode === "number" ? error.statusCode : null;

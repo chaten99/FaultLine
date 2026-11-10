@@ -32,6 +32,17 @@ import type { ChannelResult } from "../src/modules/notifications/notification.ty
 
 const queueAdd = vi.hoisted(() => vi.fn());
 
+vi.mock("../src/modules/status-pages/status-page-delivery.service.js", () => ({
+  dispatchSubscriberNotifications: vi.fn().mockResolvedValue(0),
+  processSubscriberDelivery: vi.fn(),
+  recoverStaleSubscriberDeliveries: vi.fn().mockResolvedValue(0),
+}));
+
+vi.mock("../src/modules/status-pages/status-page-realtime.service.js", () => ({
+  publishPublicIncidentUpdates: vi.fn().mockResolvedValue(undefined),
+  publishPublicStatusForMonitor: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("../src/lib/redis/redis.service.js", () => ({
   acquireLock: vi.fn().mockResolvedValue(true),
   releaseLock: vi.fn().mockResolvedValue(true),

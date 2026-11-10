@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 import { logger } from "../../config/logger.js";
 import { Monitor } from "./monitor.model.js";
+import { publishPublicStatusForMonitor } from "../status-pages/status-page-realtime.service.js";
 import { MonitorLifecycleEvent, type LifecycleEventType } from "./monitor-lifecycle.model.js";
 
 type MonitorRef = { _id: unknown; userId: unknown; active: boolean; createdAt?: Date };
@@ -43,6 +44,7 @@ export const recordMonitorActiveChange = async (
       active: monitor.active,
       at,
     });
+    void publishPublicStatusForMonitor(String(monitor.userId), String(monitor._id));
   } catch (error) {
     logger.warn(
       { err: error, monitorId: String(monitor._id) },

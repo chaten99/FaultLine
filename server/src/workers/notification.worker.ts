@@ -7,12 +7,16 @@ import {
   computeBackoffMs,
   processDelivery,
 } from "../modules/notifications/notification-delivery.service.js";
+import { processSubscriberDelivery } from "../modules/status-pages/status-page-delivery.service.js";
 import type { NotificationJobData } from "../queues/notification.queue.js";
 
 let workerInstance: Worker<NotificationJobData> | null = null;
 
 export const processNotificationJob = async (job: Job<NotificationJobData>): Promise<void> => {
-  const result = await processDelivery(job.data);
+  const result =
+    job.data.kind === "subscriber"
+      ? await processSubscriberDelivery(job.data)
+      : await processDelivery(job.data);
   if (result.outcome === "retrying") {
     throw new DeliveryRetryError(result.retryDelayMs ?? env.NOTIFICATION_RETRY_BASE_MS);
   }

@@ -1,5 +1,5 @@
 import { Types } from "mongoose";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Monitor } from "../src/modules/monitors/monitor.model.js";
 import { MonitorLifecycleEvent } from "../src/modules/monitors/monitor-lifecycle.model.js";
 import {
@@ -9,6 +9,10 @@ import {
   recordMonitorCreated,
 } from "../src/modules/monitors/monitor-lifecycle.service.js";
 import { bindMemoryModel } from "./helpers/memory-model.js";
+
+vi.mock("../src/modules/status-pages/status-page-realtime.service.js", () => ({
+  publishPublicStatusForMonitor: vi.fn().mockResolvedValue(undefined),
+}));
 
 const monitors = bindMemoryModel(Monitor);
 const events = bindMemoryModel(MonitorLifecycleEvent);
