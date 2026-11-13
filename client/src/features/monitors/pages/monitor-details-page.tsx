@@ -57,12 +57,15 @@ import { getApiErrorMessage } from "@/lib/api-error";
 import { useMonitorSocket } from "../realtime/use-monitor-socket";
 import { cn } from "@/lib/utils";
 import { MonitorAnalyticsPanel } from "@/features/analytics/components/monitor-analytics-panel";
+import { ReadOnlyBadge } from "@/features/workspaces/components/read-only-badge";
+import { useCan } from "@/features/workspaces/hooks/use-workspaces";
 
 export function MonitorDetailsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
+  const canWrite = useCan("monitors:write");
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [checkPage, setCheckPage] = useState(1);
@@ -361,59 +364,62 @@ export function MonitorDetailsPage() {
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={checkNowMutation.isPending || !monitor.active}
-                onClick={() => checkNowMutation.mutate()}
-                className="gap-2"
-              >
-                {checkNowMutation.isPending ? (
-                  <SpinnerCustom>Queuing check…</SpinnerCustom>
-                ) : (
-                  <RotateCw className="size-4" />
-                )}
-                {!checkNowMutation.isPending && "Check now"}
-              </Button>
+            {!canWrite && <ReadOnlyBadge reason="Viewers can't change monitors." />}
+            {canWrite && (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={checkNowMutation.isPending || !monitor.active}
+                  onClick={() => checkNowMutation.mutate()}
+                  className="gap-2"
+                >
+                  {checkNowMutation.isPending ? (
+                    <SpinnerCustom>Queuing check…</SpinnerCustom>
+                  ) : (
+                    <RotateCw className="size-4" />
+                  )}
+                  {!checkNowMutation.isPending && "Check now"}
+                </Button>
 
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={toggleStatusMutation.isPending}
-                onClick={() => toggleStatusMutation.mutate()}
-                className="gap-2"
-              >
-                {toggleStatusMutation.isPending ? (
-                  <Spinner className="size-4" />
-                ) : monitor.active ? (
-                  <Pause className="size-4" />
-                ) : (
-                  <Play className="size-4" />
-                )}
-                {monitor.active ? "Pause" : "Resume"}
-              </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={toggleStatusMutation.isPending}
+                  onClick={() => toggleStatusMutation.mutate()}
+                  className="gap-2"
+                >
+                  {toggleStatusMutation.isPending ? (
+                    <Spinner className="size-4" />
+                  ) : monitor.active ? (
+                    <Pause className="size-4" />
+                  ) : (
+                    <Play className="size-4" />
+                  )}
+                  {monitor.active ? "Pause" : "Resume"}
+                </Button>
 
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setEditOpen(true)}
-                className="gap-2"
-              >
-                <Pencil className="size-4" />
-                Edit
-              </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setEditOpen(true)}
+                  className="gap-2"
+                >
+                  <Pencil className="size-4" />
+                  Edit
+                </Button>
 
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => setDeleteOpen(true)}
-                className="gap-2"
-              >
-                <Trash2 className="size-4" />
-                Delete
-              </Button>
-            </div>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setDeleteOpen(true)}
+                  className="gap-2"
+                >
+                  <Trash2 className="size-4" />
+                  Delete
+                </Button>
+              </div>
+            )}
           </div>
         </div>
 

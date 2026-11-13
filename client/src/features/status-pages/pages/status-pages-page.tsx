@@ -19,10 +19,13 @@ import { useDeleteStatusPage, usePublishToggle, useStatusPages } from "../hooks/
 import { managementErrorMessage } from "../lib/errors";
 import type { StatusPageSummary } from "../types/status-page.types";
 import { CreateStatusPageDialog } from "../components/create-status-page-dialog";
+import { ReadOnlyBadge } from "@/features/workspaces/components/read-only-badge";
+import { useCan } from "@/features/workspaces/hooks/use-workspaces";
 import { StatusPageCard } from "../components/status-page-card";
 
 export function StatusPagesPage() {
   const pages = useStatusPages();
+  const canManage = useCan("status_pages:manage");
   const publish = usePublishToggle();
   const remove = useDeleteStatusPage();
   const [createOpen, setCreateOpen] = useState(false);
@@ -67,9 +70,13 @@ export function StatusPagesPage() {
               Create public pages to keep your customers informed about the health of your services.
             </p>
           </div>
-          <Button onClick={() => setCreateOpen(true)} className="shrink-0">
-            <Plus className="size-4" /> Create status page
-          </Button>
+          {canManage ? (
+            <Button onClick={() => setCreateOpen(true)} className="shrink-0">
+              <Plus className="size-4" /> Create status page
+            </Button>
+          ) : (
+            <ReadOnlyBadge reason="Viewers can see status pages but can't change them." />
+          )}
         </div>
 
         {pages.isLoading ? (
@@ -98,9 +105,11 @@ export function StatusPagesPage() {
             <p className="max-w-sm text-sm text-muted-foreground">
               Create your first status page to share your service health with customers.
             </p>
-            <Button onClick={() => setCreateOpen(true)}>
-              <Plus className="size-4" /> Create status page
-            </Button>
+            {canManage ? (
+              <Button onClick={() => setCreateOpen(true)}>
+                <Plus className="size-4" /> Create status page
+              </Button>
+            ) : null}
           </div>
         ) : (
           <ul className="space-y-4">
@@ -109,6 +118,7 @@ export function StatusPagesPage() {
                 key={page.id}
                 page={page}
                 busy={busyId === page.id}
+                canManage={canManage}
                 onPublishToggle={togglePublish}
                 onDelete={setDeleting}
               />

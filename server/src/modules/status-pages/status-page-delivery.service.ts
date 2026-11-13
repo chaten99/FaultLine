@@ -29,7 +29,7 @@ export const dispatchSubscriberNotifications = async (
 ): Promise<number> => {
   const eventKey = eventKeyFor[outbox.type];
   const monitorId = outbox.snapshot.monitorId;
-  const pages = await findPublishedPagesForMonitor(String(outbox.userId), monitorId);
+  const pages = await findPublishedPagesForMonitor(String(outbox.workspaceId), monitorId);
   let queued = 0;
   for (const page of pages) {
     if (!page.subscribersEnabled || !page.subscriberEvents?.[eventKey]) continue;

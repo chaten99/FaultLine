@@ -2,6 +2,7 @@ import { logger } from "../../config/logger.js";
 import { sendNotificationEmail } from "../../lib/email/email.service.js";
 import { renderNotificationEmail } from "../../lib/email/notification-email-template.service.js";
 import { User } from "../auth/user.model.js";
+import { WorkspaceMember } from "../workspaces/workspace-member.model.js";
 import { decryptSecret } from "./notification-crypto.service.js";
 import { NotificationIntegration } from "./notification-integration.model.js";
 import type { INotificationDelivery } from "./notification-delivery.model.js";
@@ -26,6 +27,12 @@ export const sendDelivery = async (
   const snapshot = delivery.snapshot ?? null;
 
   if (delivery.channel === "email") {
+    const membership = await WorkspaceMember.findOne({
+      workspaceId: delivery.workspaceId,
+      userId: delivery.userId,
+      status: "active",
+    }).lean();
+    if (!membership) return permanent("SUBSCRIPTION_INACTIVE");
     const user = await User.findById(delivery.userId).select("email emailVerifiedAt");
     if (!user?.emailVerifiedAt) return permanent("EMAIL_NOT_VERIFIED");
     const rendered = await renderNotificationEmail(delivery.eventType, {
@@ -43,7 +50,7 @@ export const sendDelivery = async (
   const integration = delivery.integrationId
     ? await NotificationIntegration.findOne({
         _id: delivery.integrationId,
-        userId: delivery.userId,
+        workspaceId: delivery.workspaceId,
       }).select("+encryptedUrl +encryptedSigningSecret")
     : null;
   if (!integration || !integration.enabled) return permanent("INTEGRATION_UNAVAILABLE");

@@ -1,6 +1,5 @@
 import type { Request, Response } from "express";
-import { createApiError } from "../../lib/errors/create-api-error.js";
-import type { AuthenticatedRequest } from "../auth/auth.types.js";
+import { workspaceOf } from "../workspaces/workspace-context.js";
 import {
   incidentIdSchema,
   listIncidentsSchema,
@@ -14,11 +13,7 @@ import {
   resolveIncidentManually,
 } from "./incident.service.js";
 
-const userId = (request: Request) => {
-  const id = (request as AuthenticatedRequest).userId;
-  if (!id) throw createApiError("Authentication required.", 401, "AUTHENTICATION_REQUIRED");
-  return id;
-};
+const userId = workspaceOf;
 
 export const list = async (request: Request, response: Response) => {
   const query = listIncidentsSchema.parse(request.query);

@@ -1,6 +1,7 @@
 import { createApiError } from "../../lib/errors/create-api-error.js";
 import { getScopedAvailability } from "../analytics/analytics.service.js";
 import type { RangePreset } from "../analytics/analytics-range.js";
+import { Workspace } from "../workspaces/workspace.model.js";
 import { PublicStatusPage, type IPublicStatusPage } from "./status-page.model.js";
 import { loadServiceLites } from "./status-page-realtime.service.js";
 import {
@@ -13,6 +14,10 @@ import { toPublicPayload } from "./status-page-view.js";
 export const findPublishedPage = async (slug: string): Promise<IPublicStatusPage> => {
   const page = await PublicStatusPage.findOne({ slug, status: "published" });
   if (!page) throw createApiError("Status page not found.", 404, "STATUS_PAGE_NOT_FOUND");
+  const workspace = await Workspace.findOne({ _id: page.workspaceId, status: "active" })
+    .select("_id")
+    .lean();
+  if (!workspace) throw createApiError("Status page not found.", 404, "STATUS_PAGE_NOT_FOUND");
   return page as unknown as IPublicStatusPage;
 };
 
@@ -22,7 +27,11 @@ export const findPageBySlug = async (slug: string): Promise<IPublicStatusPage | 
 export const getPublicStatusPage = async (slug: string) => {
   const page = await findPublishedPage(slug);
   const services = await loadServiceLites(String(page._id));
-  const snapshot = await getCachedStatusSnapshot(String(page._id), String(page.ownerId), services);
+  const snapshot = await getCachedStatusSnapshot(
+    String(page._id),
+    String(page.workspaceId),
+    services,
+  );
   return toPublicPayload(page, snapshot);
 };
 
@@ -32,7 +41,7 @@ export const getPublicIncidents = async (
 ) => {
   const page = await findPublishedPage(slug);
   const services = await loadServiceLites(String(page._id));
-  const { items, total } = await listPublicIncidents(String(page.ownerId), services, query);
+  const { items, total } = await listPublicIncidents(String(page.workspaceId), services, query);
   return {
     items,
     page: query.page,
@@ -45,16 +54,16 @@ export const getPublicIncidents = async (
 export const getPublicHistory = async (slug: string, range: RangePreset) => {
   const page = await findPublishedPage(slug);
   const pageId = String(page._id);
-  const ownerId = String(page.ownerId);
+  const workspaceId = String(page.workspaceId);
   return getCachedHistory(pageId, range, async () => {
     const services = (await loadServiceLites(pageId)).filter((service) => service.enabled);
     const allMonitors = [...new Set(services.flatMap((service) => service.monitorIds))];
     const [overall, perService] = await Promise.all([
-      getScopedAvailability(ownerId, allMonitors, { range }),
+      getScopedAvailability(workspaceId, allMonitors, { range }),
       Promise.all(
         services.map(async (service) => ({
           service,
-          result: await getScopedAvailability(ownerId, service.monitorIds, { range }),
+          result: await getScopedAvailability(workspaceId, service.monitorIds, { range }),
         })),
       ),
     ]);

@@ -134,6 +134,7 @@ Notifications reuse the existing incident outbox: when an incident event is disp
 Visitors connect to the `/public` Socket.IO namespace without authentication and emit `subscribe` with `{ slug }`; the server joins them to a room only if the page is published. Events `public.status.updated`, `public.incident.created`, `public.incident.updated`, `public.incident.resolved` and `public.page.unpublished` are published after incident changes are persisted, to that page's room only; the user-scoped rooms never receive them. On unpublish or delete, sockets are removed from the room. Clients load an HTTP snapshot first and resynchronize once after reconnecting.
 
 `app.set("trust proxy", ...)` trusts private-range proxies so per-IP limits see the visitor address behind nginx.
+
 ## Profile and Sessions
 
 Authenticated users manage their account at `/profile`.
@@ -141,3 +142,69 @@ Authenticated users manage their account at `/profile`.
 - `GET /api/profile` returns the account (name, email, verification state, member-since date) and live counts of monitors, active monitors, open incidents and status pages. `PATCH /api/profile` updates the display name only (2 to 80 characters, no markup). Email changes are not supported.
 - `POST /api/auth/password` changes the password after verifying the current one with argon2, rejects reuse of the current password, is limited to 5 attempts per 15 minutes, and signs out every other device while keeping the current session.
 - `GET /api/auth/sessions`, `DELETE /api/auth/sessions/:id` and `POST /api/auth/sessions/revoke-others` list and revoke refresh-token sessions. These live under `/api/auth` because the refresh cookie is scoped to that path, which is how the server tells which listed session is the current one. Each session records its last use and a browser and operating system label derived from the user agent; raw user agents, IP addresses and token hashes are never returned. Revoking the current session clears the cookie.
+
+## Workspaces and Team Management
+
+Every resource (monitors, incidents, notification integrations, preferences and deliveries, status pages) belongs to a workspace. Users act inside a workspace and may belong to many.
+
+- **Personal workspace**: created automatically at registration (and by the migration for existing users). One per user, enforced by a partial unique index; it cannot be deleted, transferred or have members invited.
+- **Team workspaces**: created by any user (up to 20 per user). The creator is the owner.
+- **Authorization boundary**: the client sends `X-Workspace-Id` only as the _requested_ context. On every request the server loads the workspace and the caller's membership, derives the role, and rejects non-members with 404. Nothing is cached, so removal takes effect on the next request. Client-supplied roles or workspace ids inside bodies are ignored. Hiding UI is a convenience, not a control.
+- **Owner**: `workspace.ownerId` is the single source of truth for ownership.
+
+### Permission matrix
+
+| Capability                                        | Owner | Admin | Member | Viewer |
+| ------------------------------------------------- | ----- | ----- | ------ | ------ |
+| View monitors, incidents, analytics, status pages | yes   | yes   | yes    | yes    |
+| Create/edit/delete monitors, pause/resume         | yes   | yes   | yes    | no     |
+| Acknowledge/resolve incidents                     | yes   | yes   | yes    | no     |
+| Manage status pages                               | yes   | yes   | yes    | no     |
+| Manage notification integrations                  | yes   | yes   | no     | no     |
+| Own email alert preferences                       | yes   | yes   | yes    | yes    |
+| Invite, change roles, remove members              | yes   | yes   | no     | no     |
+| Workspace settings, audit log                     | yes   | yes   | no     | no     |
+| Transfer ownership, delete workspace              | yes   | no    | no     | no     |
+
+The owner's role cannot be changed or removed by anyone, and members cannot change their own role. The matrix lives in `server/src/modules/workspaces/workspace-permissions.ts`.
+
+### Invitations
+
+Owners/admins invite by email with a role (admin, member or viewer). The server generates a 32-byte random token, stores only its SHA-256 digest, and emails the raw token once through Resend (EJS template). Tokens expire after `WORKSPACE_INVITATION_TTL_DAYS`. Only one pending invitation per email per workspace exists (unique partial index). Resending rotates the token. Acceptance is atomic (`findOneAndUpdate` on a still-pending, unexpired invitation), requires a verified account whose email matches the invitation, and is idempotent for the same user. Failures return a generic invalid-invitation error. The web client keeps the token in router state only (never localStorage/sessionStorage) and strips it from the URL after validation.
+
+### Ownership transfer, leave and deletion
+
+- Transfer is a compare-and-set on `ownerId`, requires password re-authentication, and demotes the old owner to admin. Concurrent transfers: exactly one wins.
+- Owners must transfer before leaving. Members can leave.
+- Deletion requires the workspace name and the owner's password. It soft-deletes (`status: deleted`, `purgeAfter = now + WORKSPACE_RETENTION_DAYS`), pauses and unschedules monitors, unpublishes status pages and revokes pending invitations. The worker permanently purges expired workspaces and all their data.
+
+### Audit log
+
+Security-relevant events (workspace created/updated/transferred/deleted, member invited/accepted/removed/role changed, invitation resent/revoked, member left) are written to an append-only collection; update and delete operations are rejected by the model. Visible to owners and admins only.
+
+### Realtime
+
+Sockets join `user:<id>` on connect and then emit `workspace:select`. The server verifies active membership before joining `workspace:<id>` and leaves previously selected workspace rooms. Resource events are published with a `workspaceId` and delivered only to that room. `workspace.access_revoked` and `workspace.role_changed` are user-targeted; revocation also removes the user's sockets from the workspace room. Room removal is applied on the instance that handles the event, so a multi-instance deployment relies on each instance consuming the Redis event stream.
+
+### Migration and deployment
+
+Existing single-user data must be migrated before the new API can see it (unmigrated resources have no workspace and are inaccessible). Run from `server/`:
+
+```
+npm run migrate:workspaces              # dry-run, no writes
+npm run migrate:workspaces -- --execute # apply
+npm run migrate:workspaces:prod -- --execute  # from the built output
+```
+
+The command is idempotent and resumable: it creates missing personal workspaces and owner memberships, backfills `workspaceId` per resource owner, drops the legacy unique `userId_1` index on notification preferences, and prints a verification report (unmigrated counts, users without a personal workspace, resources in a foreign personal workspace). It exits non-zero if verification fails. Run it right before or immediately after deploying. The API never runs migrations at startup; it only logs a warning when unmigrated data exists.
+
+### API
+
+Management routes are under `/api/workspaces` and carry the workspace id in the path. Resource routes (`/api/monitors`, `/api/incidents`, `/api/analytics`, `/api/status-pages`, `/api/notifications`) use the `X-Workspace-Id` header.
+
+- `GET /` and `POST /` list and create workspaces. `GET /:id` and `PATCH /:id` read and rename one; the read returns the caller's role and permissions.
+- `GET /:id/members`, `PATCH /:id/members/:memberId` (role), `DELETE /:id/members/:memberId`, `POST /:id/leave`.
+- `GET|POST /:id/invitations`, `POST /:id/invitations/:invitationId/resend`, `POST /:id/invitations/:invitationId/revoke`.
+- `POST /:id/transfer-ownership` and `DELETE /:id` require the current password; delete also requires the exact workspace name.
+- `GET /:id/audit-logs` returns the paginated audit log.
+- `GET /api/invitations/validate` and `POST /api/invitations/accept` handle the invitation link.

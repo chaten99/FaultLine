@@ -1,5 +1,6 @@
 import type { Namespace, Socket } from "socket.io";
 import { PublicStatusPage } from "../modules/status-pages/status-page.model.js";
+import { Workspace } from "../modules/workspaces/workspace.model.js";
 
 export const publicRoom = (pageId: string): string => `page:${pageId}`;
 
@@ -24,8 +25,14 @@ export const handlePublicSubscribe = async (
   if (typeof slug !== "string" || slug.length < 3 || slug.length > 48 || !slugPattern.test(slug)) {
     return reply(false);
   }
-  const page = await PublicStatusPage.findOne({ slug, status: "published" }).select("_id").lean();
+  const page = await PublicStatusPage.findOne({ slug, status: "published" })
+    .select("_id workspaceId")
+    .lean();
   if (!page) return reply(false);
+  const workspace = await Workspace.findOne({ _id: page.workspaceId, status: "active" })
+    .select("_id")
+    .lean();
+  if (!workspace) return reply(false);
   for (const room of socket.rooms) {
     if (room.startsWith("page:")) await socket.leave(room);
   }

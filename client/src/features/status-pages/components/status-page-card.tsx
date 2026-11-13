@@ -27,11 +27,13 @@ export const copyPublicUrl = async (url: string) => {
 export function StatusPageCard({
   page,
   busy,
+  canManage = true,
   onPublishToggle,
   onDelete,
 }: {
   page: StatusPageSummary;
   busy: boolean;
+  canManage?: boolean;
   onPublishToggle: (page: StatusPageSummary) => void;
   onDelete: (page: StatusPageSummary) => void;
 }) {
@@ -73,11 +75,13 @@ export function StatusPageCard({
               <TooltipContent>Actions</TooltipContent>
             </Tooltip>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem asChild>
-                <Link to={`/status-pages/${page.id}/edit`}>
-                  <Pencil className="size-4" /> Open editor
-                </Link>
-              </DropdownMenuItem>
+              {canManage ? (
+                <DropdownMenuItem asChild>
+                  <Link to={`/status-pages/${page.id}/edit`}>
+                    <Pencil className="size-4" /> Open editor
+                  </Link>
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem asChild>
                 <Link to={`/status-pages/${page.id}/preview`}>
                   <Eye className="size-4" /> Preview
@@ -89,21 +93,25 @@ export function StatusPageCard({
               >
                 <Copy className="size-4" /> Copy public URL
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => onPublishToggle(page)}>
-                {published ? (
-                  <>
-                    <EyeOff className="size-4" /> Unpublish
-                  </>
-                ) : (
-                  <>
-                    <Globe className="size-4" /> Publish
-                  </>
-                )}
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => onDelete(page)} className="text-destructive">
-                <Trash2 className="size-4" /> Delete
-              </DropdownMenuItem>
+              {canManage ? <DropdownMenuSeparator /> : null}
+              {canManage ? (
+                <DropdownMenuItem onSelect={() => onPublishToggle(page)}>
+                  {published ? (
+                    <>
+                      <EyeOff className="size-4" /> Unpublish
+                    </>
+                  ) : (
+                    <>
+                      <Globe className="size-4" /> Publish
+                    </>
+                  )}
+                </DropdownMenuItem>
+              ) : null}
+              {canManage ? (
+                <DropdownMenuItem onSelect={() => onDelete(page)} className="text-destructive">
+                  <Trash2 className="size-4" /> Delete
+                </DropdownMenuItem>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

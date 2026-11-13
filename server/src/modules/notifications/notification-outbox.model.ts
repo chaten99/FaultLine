@@ -8,6 +8,7 @@ export interface INotificationOutbox {
   _id: Types.ObjectId;
   eventId: string;
   type: IncidentEventType;
+  workspaceId: Types.ObjectId;
   userId: Types.ObjectId;
   incidentId: Types.ObjectId;
   snapshot: IncidentNotificationSnapshot;
@@ -27,6 +28,7 @@ const outboxSchema = new Schema<INotificationOutbox>(
   {
     eventId: { type: String, required: true, unique: true },
     type: { type: String, enum: incidentEventTypes, required: true },
+    workspaceId: { type: Schema.Types.ObjectId, ref: "Workspace", required: true, index: true },
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     incidentId: { type: Schema.Types.ObjectId, ref: "Incident", required: true, index: true },
     snapshot: { type: Schema.Types.Mixed, required: true },

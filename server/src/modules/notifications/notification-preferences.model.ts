@@ -1,6 +1,7 @@
 import { Schema, model, type Types } from "mongoose";
 
 export interface INotificationPreferences {
+  workspaceId: Types.ObjectId;
   userId: Types.ObjectId;
   enabled: boolean;
   channels: { email: boolean; slack: boolean; webhook: boolean };
@@ -17,7 +18,8 @@ export const defaultNotificationPreferences = {
 
 const preferencesSchema = new Schema<INotificationPreferences>(
   {
-    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, unique: true },
+    workspaceId: { type: Schema.Types.ObjectId, ref: "Workspace", required: true },
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     enabled: { type: Boolean, required: true, default: defaultNotificationPreferences.enabled },
     channels: {
       email: { type: Boolean, default: defaultNotificationPreferences.channels.email },
@@ -32,6 +34,8 @@ const preferencesSchema = new Schema<INotificationPreferences>(
   },
   { timestamps: true },
 );
+
+preferencesSchema.index({ workspaceId: 1, userId: 1 }, { unique: true });
 
 export const NotificationPreferences = model<INotificationPreferences>(
   "NotificationPreferences",

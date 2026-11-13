@@ -24,6 +24,7 @@ export interface INotificationDelivery {
   kind: "incident" | "test";
   eventId: string;
   eventType: DeliveryEventType;
+  workspaceId: Types.ObjectId;
   userId: Types.ObjectId;
   channel: ChannelType;
   integrationId?: Types.ObjectId;
@@ -71,6 +72,7 @@ const deliverySchema = new Schema<INotificationDelivery>(
       enum: [...incidentEventTypes, "notification.test"],
       required: true,
     },
+    workspaceId: { type: Schema.Types.ObjectId, ref: "Workspace", required: true },
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     channel: { type: String, enum: channelTypes, required: true },
     integrationId: { type: Schema.Types.ObjectId, ref: "NotificationIntegration" },
@@ -95,8 +97,9 @@ const deliverySchema = new Schema<INotificationDelivery>(
   { timestamps: true },
 );
 
+deliverySchema.index({ workspaceId: 1, createdAt: -1 });
+deliverySchema.index({ workspaceId: 1, status: 1, createdAt: -1 });
 deliverySchema.index({ userId: 1, createdAt: -1 });
-deliverySchema.index({ userId: 1, status: 1, createdAt: -1 });
 deliverySchema.index({ eventId: 1 });
 deliverySchema.index({ status: 1, updatedAt: 1 });
 deliverySchema.index({ integrationId: 1, createdAt: -1 });

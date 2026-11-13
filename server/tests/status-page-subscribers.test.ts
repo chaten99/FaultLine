@@ -20,6 +20,11 @@ import { PublicStatusPage } from "../src/modules/status-pages/status-page.model.
 import { DeliveryRetryError } from "../src/modules/notifications/notification-delivery.service.js";
 import { processNotificationJob } from "../src/workers/notification.worker.js";
 import { bindMemoryModel } from "./helpers/memory-model.js";
+import {
+  bindWorkspaceModels,
+  resetWorkspaceModels,
+  seedWorkspace,
+} from "./helpers/workspace-fixtures.js";
 
 const state = vi.hoisted(() => {
   const counts = new Map<string, number>();
@@ -63,9 +68,12 @@ const pages = bindMemoryModel(PublicStatusPage, { uniqueKeys: ["slug"] });
 const services = bindMemoryModel(StatusPageService);
 const subscribers = bindMemoryModel(StatusPageSubscriber);
 const deliveries = bindMemoryModel(StatusPageDelivery, { uniqueKeys: ["deliveryKey"] });
+const workspaceStores = bindWorkspaceModels();
 
 const owner = new Types.ObjectId();
 const otherOwner = new Types.ObjectId();
+const workspaceId = new Types.ObjectId();
+const otherWorkspaceId = new Types.ObjectId();
 const monitorId = new Types.ObjectId();
 const pageId = new Types.ObjectId();
 
@@ -75,6 +83,7 @@ const addPage = (overrides: Record<string, unknown> = {}) => {
   const _id = (overrides._id as Types.ObjectId | undefined) ?? new Types.ObjectId();
   pages.docs.push({
     _id,
+    workspaceId,
     ownerId: owner,
     name: "Acme Status",
     slug: "acme-status",
@@ -94,6 +103,7 @@ const addService = (page: Types.ObjectId, overrides: Record<string, unknown> = {
   services.docs.push({
     _id: new Types.ObjectId(),
     pageId: page,
+    workspaceId,
     ownerId: owner,
     name: "Public API",
     description: "",
@@ -136,6 +146,9 @@ const flush = () => vi.waitFor(() => expect(sendMock).toHaveBeenCalled());
 
 beforeEach(() => {
   [monitors, incidents, pages, services, subscribers, deliveries].forEach((store) => store.reset());
+  resetWorkspaceModels(workspaceStores);
+  seedWorkspace(workspaceStores, { ownerId: owner, id: workspaceId });
+  seedWorkspace(workspaceStores, { ownerId: otherOwner, id: otherWorkspaceId });
   state.counts.clear();
   state.queueAdd.mockReset();
   state.queueAdd.mockResolvedValue({ id: "job" });
@@ -436,6 +449,7 @@ const outbox = (type: INotificationOutbox["type"], overrides: Record<string, unk
     eventId: `${type}:inc1`,
     type,
     userId: owner,
+    workspaceId,
     incidentId: new Types.ObjectId(),
     snapshot: {
       incidentId: "inc1",
@@ -516,9 +530,28 @@ describe("subscriber notification dispatch", () => {
     expect(await dispatchSubscriberNotifications(outbox("incident.opened"))).toBe(0);
     pages.docs[0]!.subscribersEnabled = true;
     expect(
-      await dispatchSubscriberNotifications(outbox("incident.opened", { userId: otherOwner })),
+      await dispatchSubscriberNotifications(
+        outbox("incident.opened", { userId: otherOwner, workspaceId: otherWorkspaceId }),
+      ),
     ).toBe(0);
     expect(await dispatchSubscriberNotifications(outbox("incident.opened"))).toBe(1);
+  });
+
+  it("does not notify pages whose workspace was deleted", async () => {
+    addSubscriber();
+    workspaceStores.workspaces.docs.find((doc) => String(doc._id) === String(workspaceId))!.status =
+      "deleted";
+    expect(await dispatchSubscriberNotifications(outbox("incident.opened"))).toBe(0);
+    expect(deliveries.docs).toHaveLength(0);
+  });
+
+  it("does not notify a page from another workspace even when the monitor id matches", async () => {
+    addSubscriber();
+    expect(
+      await dispatchSubscriberNotifications(
+        outbox("incident.opened", { workspaceId: otherWorkspaceId }),
+      ),
+    ).toBe(0);
   });
 
   it("keeps each page's subscribers separate and stores only public-safe content", async () => {

@@ -3,12 +3,14 @@ import { createServer } from "node:http";
 import { app } from "./app.js";
 import { env } from "./config/env.js";
 import { logger } from "./config/logger.js";
+import { warnIfUnmigrated } from "./modules/workspaces/workspace-purge.service.js";
 import { ensureLifecycleBaselines } from "./modules/monitors/monitor-lifecycle.service.js";
 import { startMonitorRealtime } from "./realtime/monitor-realtime.js";
 
 const startServer = async () => {
   try {
     await mongoose.connect(env.MONGODB_URI);
+    await warnIfUnmigrated().catch(() => 0);
     await ensureLifecycleBaselines().catch((error: unknown) => {
       logger.warn({ err: error }, "Monitor lifecycle baseline failed");
     });

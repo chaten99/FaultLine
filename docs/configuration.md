@@ -72,3 +72,12 @@ Analytics adds no new environment variables. History is bounded by `CHECK_RETENT
 - `APP_ORIGIN`: the public base URL used for status page, confirmation and unsubscribe links (`<APP_ORIGIN>/status/<slug>`).
 
 Subscriber emails use the existing `RESEND_API_KEY`, `RESEND_FROM_EMAIL` and notification queue settings. Behind nginx, forward `X-Forwarded-For` so rate limits apply per visitor.
+
+## Workspaces
+
+- `WORKSPACE_INVITATION_TTL_DAYS`: how long an invitation link stays valid (default `7`).
+- `WORKSPACE_RETENTION_DAYS`: how long a deleted workspace is kept before the worker permanently purges it (default `30`).
+
+Invitation emails use the existing `RESEND_API_KEY`, `RESEND_FROM_EMAIL` and `APP_ORIGIN` (links point to `<APP_ORIGIN>/invitations/accept`). Run `npm run migrate:workspaces` (dry-run) and then `-- --execute` when upgrading an existing installation.
+
+Set `ANALYTICS_TEST_MONGODB_URI` to a throwaway database to also run the MongoDB-backed integration tests (analytics, workspaces and the migration); it is dropped by the tests.

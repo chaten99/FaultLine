@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticate } from "../../middleware/authenticate.js";
+import { withWorkspace } from "../workspaces/workspace-context.js";
 import { rateLimit } from "../../lib/rate-limit.js";
 import {
   availability,
@@ -15,11 +15,11 @@ export const analyticsRouter = Router();
 const readLimit = rateLimit("analytics:read", 120, 60);
 const exportLimit = rateLimit("analytics:export", 10, 60);
 
-analyticsRouter.use(authenticate);
-analyticsRouter.get("/overview", readLimit, overview);
-analyticsRouter.get("/response-times", readLimit, responseTimes);
-analyticsRouter.get("/availability", readLimit, availability);
-analyticsRouter.get("/monitors", readLimit, monitorTable);
-analyticsRouter.get("/incidents", readLimit, incidents);
-analyticsRouter.get("/export", exportLimit, exportReport);
-analyticsRouter.get("/monitors/:monitorId", readLimit, monitorDetail);
+const viewAnalytics = withWorkspace("analytics:view");
+analyticsRouter.get("/overview", ...viewAnalytics, readLimit, overview);
+analyticsRouter.get("/response-times", ...viewAnalytics, readLimit, responseTimes);
+analyticsRouter.get("/availability", ...viewAnalytics, readLimit, availability);
+analyticsRouter.get("/monitors", ...viewAnalytics, readLimit, monitorTable);
+analyticsRouter.get("/incidents", ...viewAnalytics, readLimit, incidents);
+analyticsRouter.get("/export", ...viewAnalytics, exportLimit, exportReport);
+analyticsRouter.get("/monitors/:monitorId", ...viewAnalytics, readLimit, monitorDetail);

@@ -5,6 +5,7 @@ import { Monitor } from "../monitors/monitor.model.js";
 import { createApiError } from "../../lib/errors/create-api-error.js";
 import { publishDomainEvent } from "../../lib/redis/redis.service.js";
 import { logger } from "../../config/logger.js";
+import type { WorkspaceContext } from "../workspaces/workspace.types.js";
 import { recordIncidentNotificationEvent } from "../notifications/notification-outbox.service.js";
 
 export const QUALIFYING_FAILURES = ["UNEXPECTED_STATUS", "TIMEOUT", "NETWORK_ERROR", "DNS_FAILURE"];
@@ -77,6 +78,7 @@ export const evaluateCheckForIncident = async (
           incidentDoc = await Incident.create({
             monitorId: monitor._id,
             userId: monitor.userId,
+            workspaceId: monitor.workspaceId,
             title: `Incident on ${monitor.name}: ${checkData.failureCategory}`,
             status: "open",
             firstFailureAt,
@@ -132,7 +134,7 @@ export const evaluateCheckForIncident = async (
           await recordIncidentNotificationEvent("incident.opened", String(incidentDoc._id));
 
           await publishDomainEvent("incident.created", {
-            userId: String(monitor.userId),
+            workspaceId: String(monitor.workspaceId),
             payload: {
               incidentId: String(incidentDoc._id),
               monitorId: String(monitor._id),
@@ -192,7 +194,7 @@ export const evaluateCheckForIncident = async (
       });
 
       await publishDomainEvent("incident.updated", {
-        userId: String(monitor.userId),
+        workspaceId: String(monitor.workspaceId),
         payload: {
           incidentId: String(activeIncident._id),
           monitorId: String(monitor._id),
@@ -268,7 +270,7 @@ export const evaluateCheckForIncident = async (
         await recordIncidentNotificationEvent("incident.resolved", String(activeIncident._id));
 
         await publishDomainEvent("incident.resolved", {
-          userId: String(monitor.userId),
+          workspaceId: String(monitor.workspaceId),
           payload: {
             incidentId: String(activeIncident._id),
             monitorId: String(monitor._id),
@@ -307,7 +309,7 @@ export const evaluateCheckForIncident = async (
         });
 
         await publishDomainEvent("incident.recovery_progress", {
-          userId: String(monitor.userId),
+          workspaceId: String(monitor.workspaceId),
           payload: {
             incidentId: String(activeIncident._id),
             monitorId: String(monitor._id),
@@ -321,7 +323,7 @@ export const evaluateCheckForIncident = async (
 };
 
 export const listIncidents = async (
-  userId: string,
+  ctx: WorkspaceContext,
   options: {
     page: number;
     pageSize: number;
@@ -332,7 +334,7 @@ export const listIncidents = async (
   },
 ) => {
   const { page, pageSize, status, monitorId, sortBy = "createdAt", sortOrder = "desc" } = options;
-  const filter: Record<string, unknown> = { userId };
+  const filter: Record<string, unknown> = { workspaceId: ctx.workspaceId };
 
   if (status && status !== "all") {
     filter.status = status;
@@ -359,7 +361,9 @@ export const listIncidents = async (
     sortObj.createdAt = -1;
   }
 
-  const baseCountsFilter = monitorId ? { userId, monitorId } : { userId };
+  const baseCountsFilter = monitorId
+    ? { workspaceId: ctx.workspaceId, monitorId }
+    : { workspaceId: ctx.workspaceId };
 
   const [items, total, openCount, acknowledgedCount, resolvedCount] = await Promise.all([
     Incident.find(filter)
@@ -389,12 +393,12 @@ export const listIncidents = async (
   };
 };
 
-export const getIncidentDetails = async (userId: string, incidentId: string) => {
+export const getIncidentDetails = async (ctx: WorkspaceContext, incidentId: string) => {
   if (!Types.ObjectId.isValid(incidentId) || !/^[a-f\d]{24}$/i.test(incidentId)) {
     throw createApiError("Incident not found.", 404, "INCIDENT_NOT_FOUND");
   }
 
-  const incident = await Incident.findOne({ _id: incidentId, userId })
+  const incident = await Incident.findOne({ _id: incidentId, workspaceId: ctx.workspaceId })
     .populate("monitorId", "name url intervalSeconds timeoutMs active")
     .lean();
 
@@ -410,12 +414,12 @@ export const getIncidentDetails = async (userId: string, incidentId: string) => 
   return { incident, timeline };
 };
 
-export const acknowledgeIncident = async (userId: string, incidentId: string) => {
+export const acknowledgeIncident = async (ctx: WorkspaceContext, incidentId: string) => {
   if (!Types.ObjectId.isValid(incidentId) || !/^[a-f\d]{24}$/i.test(incidentId)) {
     throw createApiError("Incident not found.", 404, "INCIDENT_NOT_FOUND");
   }
 
-  const incident = await Incident.findOne({ _id: incidentId, userId });
+  const incident = await Incident.findOne({ _id: incidentId, workspaceId: ctx.workspaceId });
   if (!incident) {
     throw createApiError("Incident not found.", 404, "INCIDENT_NOT_FOUND");
   }
@@ -438,7 +442,7 @@ export const acknowledgeIncident = async (userId: string, incidentId: string) =>
 
   incident.status = "acknowledged";
   incident.acknowledgedAt = new Date();
-  incident.acknowledgedBy = new Types.ObjectId(userId);
+  incident.acknowledgedBy = new Types.ObjectId(ctx.userId);
   await incident.save();
 
   try {
@@ -448,7 +452,7 @@ export const acknowledgeIncident = async (userId: string, incidentId: string) =>
       userId: incident.userId,
       type: "incident.acknowledged",
       actorType: "user",
-      actorId: new Types.ObjectId(userId),
+      actorId: new Types.ObjectId(ctx.userId),
       message: "Incident acknowledged by user.",
     });
   } catch (timelineErr) {
@@ -458,7 +462,7 @@ export const acknowledgeIncident = async (userId: string, incidentId: string) =>
   await recordIncidentNotificationEvent("incident.acknowledged", String(incident._id));
 
   await publishDomainEvent("incident.acknowledged", {
-    userId: String(incident.userId),
+    workspaceId: String(incident.workspaceId),
     payload: {
       incidentId: String(incident._id),
       monitorId: String(incident.monitorId),
@@ -471,7 +475,7 @@ export const acknowledgeIncident = async (userId: string, incidentId: string) =>
 };
 
 export const resolveIncidentManually = async (
-  userId: string,
+  ctx: WorkspaceContext,
   incidentId: string,
   reason?: string,
 ) => {
@@ -479,7 +483,7 @@ export const resolveIncidentManually = async (
     throw createApiError("Incident not found.", 404, "INCIDENT_NOT_FOUND");
   }
 
-  const incident = await Incident.findOne({ _id: incidentId, userId });
+  const incident = await Incident.findOne({ _id: incidentId, workspaceId: ctx.workspaceId });
   if (!incident) {
     throw createApiError("Incident not found.", 404, "INCIDENT_NOT_FOUND");
   }
@@ -518,7 +522,7 @@ export const resolveIncidentManually = async (
       userId: incident.userId,
       type: "incident.manually_resolved",
       actorType: "user",
-      actorId: new Types.ObjectId(userId),
+      actorId: new Types.ObjectId(ctx.userId),
       message: reason?.trim()
         ? `Incident manually resolved: ${reason.trim()}`
         : "Incident manually resolved by user.",
@@ -531,7 +535,7 @@ export const resolveIncidentManually = async (
   await recordIncidentNotificationEvent("incident.resolved", String(incident._id));
 
   await publishDomainEvent("incident.resolved", {
-    userId: String(incident.userId),
+    workspaceId: String(incident.workspaceId),
     payload: {
       incidentId: String(incident._id),
       monitorId: String(incident.monitorId),
@@ -545,11 +549,11 @@ export const resolveIncidentManually = async (
   return incident;
 };
 
-export const getIncidentsSummary = async (userId: string) => {
+export const getIncidentsSummary = async (ctx: WorkspaceContext) => {
   const [open, acknowledged, resolved] = await Promise.all([
-    Incident.countDocuments({ userId, status: "open" }),
-    Incident.countDocuments({ userId, status: "acknowledged" }),
-    Incident.countDocuments({ userId, status: "resolved" }),
+    Incident.countDocuments({ workspaceId: ctx.workspaceId, status: "open" }),
+    Incident.countDocuments({ workspaceId: ctx.workspaceId, status: "acknowledged" }),
+    Incident.countDocuments({ workspaceId: ctx.workspaceId, status: "resolved" }),
   ]);
 
   return {

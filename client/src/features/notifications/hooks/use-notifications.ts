@@ -46,9 +46,10 @@ export const useUpdatePreferences = () => {
   });
 };
 
-export const useIntegrations = () =>
+export const useIntegrations = (enabled = true) =>
   useQuery({
     queryKey: notificationKeys.integrations,
+    enabled,
     queryFn: async () => (await listIntegrations()).data.items,
   });
 

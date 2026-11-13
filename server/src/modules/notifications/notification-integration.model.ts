@@ -4,6 +4,7 @@ import type { IncidentEventType, IntegrationType } from "./notification.types.js
 
 export interface INotificationIntegration {
   _id: Types.ObjectId;
+  workspaceId: Types.ObjectId;
   userId: Types.ObjectId;
   type: IntegrationType;
   name: string;
@@ -18,6 +19,7 @@ export interface INotificationIntegration {
 
 const integrationSchema = new Schema<INotificationIntegration>(
   {
+    workspaceId: { type: Schema.Types.ObjectId, ref: "Workspace", required: true },
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     type: { type: String, enum: integrationTypes, required: true },
     name: { type: String, required: true, trim: true, maxlength: 80 },
@@ -30,7 +32,7 @@ const integrationSchema = new Schema<INotificationIntegration>(
   { timestamps: true },
 );
 
-integrationSchema.index({ userId: 1, type: 1, createdAt: -1 });
+integrationSchema.index({ workspaceId: 1, type: 1, createdAt: -1 });
 
 export const NotificationIntegration = model<INotificationIntegration>(
   "NotificationIntegration",

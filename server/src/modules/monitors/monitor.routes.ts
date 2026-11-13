@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticate } from "../../middleware/authenticate.js";
+import { withWorkspace } from "../workspaces/workspace-context.js";
 import {
   checkNow,
   create,
@@ -12,12 +12,11 @@ import {
 } from "./monitor.controller.js";
 
 export const monitorRouter = Router();
-monitorRouter.use(authenticate);
-monitorRouter.get("/", list);
-monitorRouter.post("/", create);
-monitorRouter.get("/:id", get);
-monitorRouter.patch("/:id", update);
-monitorRouter.delete("/:id", remove);
-monitorRouter.post("/:id/check-now", checkNow);
-monitorRouter.get("/:id/checks", listChecks);
-monitorRouter.get("/:id/checks/:checkId", getCheck);
+monitorRouter.get("/", ...withWorkspace("monitors:view"), list);
+monitorRouter.post("/", ...withWorkspace("monitors:write"), create);
+monitorRouter.get("/:id", ...withWorkspace("monitors:view"), get);
+monitorRouter.patch("/:id", ...withWorkspace("monitors:write"), update);
+monitorRouter.delete("/:id", ...withWorkspace("monitors:write"), remove);
+monitorRouter.post("/:id/check-now", ...withWorkspace("monitors:write"), checkNow);
+monitorRouter.get("/:id/checks", ...withWorkspace("monitors:view"), listChecks);
+monitorRouter.get("/:id/checks/:checkId", ...withWorkspace("monitors:view"), getCheck);

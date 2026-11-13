@@ -36,9 +36,13 @@ export const computeBackoffMs = (
 
 export const deliveryRetentionDate = (): Date => new Date(Date.now() + retentionMs);
 
-export const publishDeliveryUpdate = async (userId: string, deliveryId: string, status: string) => {
+export const publishDeliveryUpdate = async (
+  workspaceId: string,
+  deliveryId: string,
+  status: string,
+) => {
   await publishDomainEvent("notification.delivery_updated", {
-    userId,
+    workspaceId,
     payload: { deliveryId, status },
   });
 };
@@ -79,8 +83,8 @@ export const processDelivery = async (
   );
   if (!claimed) return { outcome: "skipped" };
 
-  const userId = String(claimed.userId);
-  await publishDeliveryUpdate(userId, data.deliveryId, "sending");
+  const workspaceId = String(claimed.workspaceId);
+  await publishDeliveryUpdate(workspaceId, data.deliveryId, "sending");
 
   let result: ChannelResult;
   try {
@@ -127,7 +131,7 @@ export const processDelivery = async (
         },
       },
     );
-    await publishDeliveryUpdate(userId, data.deliveryId, "delivered");
+    await publishDeliveryUpdate(workspaceId, data.deliveryId, "delivered");
     return { outcome: "delivered" };
   }
 
@@ -157,17 +161,20 @@ export const processDelivery = async (
       $push: { attemptHistory: { $each: [historyEntry], $slice: -20 } },
     },
   );
-  await publishDeliveryUpdate(userId, data.deliveryId, willRetry ? "retrying" : "failed");
+  await publishDeliveryUpdate(workspaceId, data.deliveryId, willRetry ? "retrying" : "failed");
 
   if (willRetry && retryDelayMs !== undefined) return { outcome: "retrying", retryDelayMs };
   return { outcome: "failed" };
 };
 
-export const retryFailedDelivery = async (userId: string, deliveryId: string) => {
+export const retryFailedDelivery = async (workspaceId: string, deliveryId: string) => {
   if (!Types.ObjectId.isValid(deliveryId)) {
     throw createApiError("Delivery not found.", 404, "DELIVERY_NOT_FOUND");
   }
-  const existing = await NotificationDelivery.findOne({ _id: deliveryId, userId });
+  const existing = await NotificationDelivery.findOne({
+    _id: deliveryId,
+    workspaceId: new Types.ObjectId(workspaceId),
+  });
   if (!existing) throw createApiError("Delivery not found.", 404, "DELIVERY_NOT_FOUND");
   if (existing.status !== "failed" || existing.kind !== "incident") {
     throw createApiError(
@@ -177,7 +184,12 @@ export const retryFailedDelivery = async (userId: string, deliveryId: string) =>
     );
   }
   const reset = await NotificationDelivery.findOneAndUpdate(
-    { _id: existing._id, userId, status: "failed", generation: existing.generation },
+    {
+      _id: existing._id,
+      workspaceId: new Types.ObjectId(workspaceId),
+      status: "failed",
+      generation: existing.generation,
+    },
     {
       $set: { status: "pending", attempts: 0 },
       $inc: { generation: 1 },
@@ -193,7 +205,7 @@ export const retryFailedDelivery = async (userId: string, deliveryId: string) =>
   } catch (error) {
     logger.warn({ err: error, deliveryId }, "Manual delivery retry could not be queued yet");
   }
-  await publishDeliveryUpdate(userId, deliveryId, "pending");
+  await publishDeliveryUpdate(workspaceId, deliveryId, "pending");
   return NotificationDelivery.findById(reset._id);
 };
 

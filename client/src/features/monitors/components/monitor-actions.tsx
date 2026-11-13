@@ -1,6 +1,7 @@
 import { Eye, MoreHorizontal, Pause, Pencil, Play, RefreshCw, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { useCan } from "@/features/workspaces/hooks/use-workspaces";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -32,6 +33,7 @@ export function MonitorActions({
   onCheckNow,
 }: MonitorActionsProps) {
   const isLoading = isPending || isChecking;
+  const canWrite = useCan("monitors:write");
 
   return (
     <DropdownMenu>
@@ -60,7 +62,7 @@ export function MonitorActions({
           </Link>
         </DropdownMenuItem>
 
-        {onCheckNow && (
+        {onCheckNow && canWrite && (
           <DropdownMenuItem
             onClick={() => onCheckNow(monitor)}
             disabled={isLoading || !monitor.active}
@@ -70,34 +72,38 @@ export function MonitorActions({
           </DropdownMenuItem>
         )}
 
-        <DropdownMenuItem onClick={() => onEdit(monitor)}>
-          <Pencil className="size-4" />
-          <span>Edit monitor</span>
-        </DropdownMenuItem>
+        {canWrite && (
+          <>
+            <DropdownMenuItem onClick={() => onEdit(monitor)}>
+              <Pencil className="size-4" />
+              <span>Edit monitor</span>
+            </DropdownMenuItem>
 
-        <DropdownMenuItem onClick={() => onToggleStatus(monitor)} disabled={isPending}>
-          {monitor.active ? (
-            <>
-              <Pause className="size-4" />
-              <span>Pause monitor</span>
-            </>
-          ) : (
-            <>
-              <Play className="size-4" />
-              <span>Resume monitor</span>
-            </>
-          )}
-        </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onToggleStatus(monitor)} disabled={isPending}>
+              {monitor.active ? (
+                <>
+                  <Pause className="size-4" />
+                  <span>Pause monitor</span>
+                </>
+              ) : (
+                <>
+                  <Play className="size-4" />
+                  <span>Resume monitor</span>
+                </>
+              )}
+            </DropdownMenuItem>
 
-        <DropdownMenuSeparator />
+            <DropdownMenuSeparator />
 
-        <DropdownMenuItem
-          onClick={() => onDelete(monitor)}
-          className="text-destructive focus:bg-destructive/10 focus:text-destructive"
-        >
-          <Trash2 className="size-4 text-destructive" />
-          <span>Delete monitor</span>
-        </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => onDelete(monitor)}
+              className="text-destructive focus:bg-destructive/10 focus:text-destructive"
+            >
+              <Trash2 className="size-4 text-destructive" />
+              <span>Delete monitor</span>
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

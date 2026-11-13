@@ -18,6 +18,11 @@ import {
   routePublicEvent,
 } from "../src/realtime/public-realtime.js";
 import { bindMemoryModel } from "./helpers/memory-model.js";
+import {
+  bindWorkspaceModels,
+  resetWorkspaceModels,
+  seedWorkspace,
+} from "./helpers/workspace-fixtures.js";
 
 const published = vi.hoisted(() => ({
   events: [] as Array<{ type: string; payload: Record<string, unknown> }>,
@@ -40,7 +45,9 @@ const incidents = bindMemoryModel(Incident);
 const pages = bindMemoryModel(PublicStatusPage, { uniqueKeys: ["slug"] });
 const services = bindMemoryModel(StatusPageService);
 
+const workspaceStores = bindWorkspaceModels();
 const owner = new Types.ObjectId();
+const workspaceId = new Types.ObjectId();
 const monitorId = new Types.ObjectId();
 const incidentId = new Types.ObjectId();
 const livePage = new Types.ObjectId();
@@ -49,6 +56,7 @@ const draftPage = new Types.ObjectId();
 const addPage = (id: Types.ObjectId, slug: string, status: string) =>
   pages.docs.push({
     _id: id,
+    workspaceId,
     ownerId: owner,
     name: `Page ${slug}`,
     slug,
@@ -62,6 +70,7 @@ const addService = (pageId: Types.ObjectId, name: string) =>
   services.docs.push({
     _id: new Types.ObjectId(),
     pageId,
+    workspaceId,
     ownerId: owner,
     name,
     description: "",
@@ -83,10 +92,13 @@ const fakeSocket = (rooms: string[] = ["socket-id"]) => ({
 
 beforeEach(() => {
   [monitors, checks, incidents, pages, services].forEach((store) => store.reset());
+  resetWorkspaceModels(workspaceStores);
+  seedWorkspace(workspaceStores, { ownerId: owner, id: workspaceId });
   published.events.length = 0;
   invalidateStatusCache();
   monitors.docs.push({
     _id: monitorId,
+    workspaceId,
     userId: owner,
     name: "Internal Checkout Monitor",
     url: "https://secret.internal.example/health?token=SECRET",
@@ -97,6 +109,7 @@ beforeEach(() => {
   });
   incidents.docs.push({
     _id: incidentId,
+    workspaceId,
     userId: owner,
     monitorId,
     title: "Incident on Internal Checkout Monitor: UNEXPECTED_STATUS",
@@ -125,6 +138,7 @@ describe("public socket subscriptions", () => {
   it("rejects unpublished, draft, unknown and malformed slugs without joining anything", async () => {
     pages.docs.push({
       _id: new Types.ObjectId(),
+      workspaceId,
       ownerId: owner,
       name: "Old",
       slug: "old-page",
@@ -150,6 +164,15 @@ describe("public socket subscriptions", () => {
       expect(socket.join).not.toHaveBeenCalled();
       expect(ack).toHaveBeenCalledWith({ ok: false });
     }
+  });
+
+  it("refuses subscriptions to pages of deleted workspaces", async () => {
+    workspaceStores.workspaces.docs[0]!.status = "deleted";
+    const socket = fakeSocket();
+    const ack = vi.fn();
+    expect(await handlePublicSubscribe(socket as never, { slug: "live-page" }, ack)).toBe(false);
+    expect(socket.join).not.toHaveBeenCalled();
+    expect(ack).toHaveBeenCalledWith({ ok: false });
   });
 
   it("works without an ack callback", async () => {
@@ -285,7 +308,9 @@ describe("publishing public updates after persisted incident changes", () => {
     "UNEXPECTED_STATUS",
     "ownerId",
     "userId",
+    "workspaceId",
     String(owner),
+    String(workspaceId),
     String(monitorId),
     "monitorId",
     "resolutionReason",
@@ -293,7 +318,7 @@ describe("publishing public updates after persisted incident changes", () => {
 
   it("publishes a public-safe incident and status event for published pages only", async () => {
     await publishPublicIncidentUpdates({
-      ownerId: String(owner),
+      workspaceId: String(workspaceId),
       monitorId: String(monitorId),
       incidentId: String(incidentId),
       eventType: "incident.opened",
@@ -324,7 +349,7 @@ describe("publishing public updates after persisted incident changes", () => {
     incident.status = "acknowledged";
     incident.acknowledgedAt = new Date();
     await publishPublicIncidentUpdates({
-      ownerId: String(owner),
+      workspaceId: String(workspaceId),
       monitorId: String(monitorId),
       incidentId: String(incidentId),
       eventType: "incident.acknowledged",
@@ -332,7 +357,7 @@ describe("publishing public updates after persisted incident changes", () => {
     incident.status = "resolved";
     incident.resolvedAt = new Date();
     await publishPublicIncidentUpdates({
-      ownerId: String(owner),
+      workspaceId: String(workspaceId),
       monitorId: String(monitorId),
       incidentId: String(incidentId),
       eventType: "incident.resolved",
@@ -352,14 +377,25 @@ describe("publishing public updates after persisted incident changes", () => {
   it("publishes nothing when no published page includes the monitor", async () => {
     pages.docs[0]!.status = "unpublished";
     await publishPublicIncidentUpdates({
-      ownerId: String(owner),
+      workspaceId: String(workspaceId),
       monitorId: String(monitorId),
       incidentId: String(incidentId),
       eventType: "incident.opened",
     });
     expect(published.events).toHaveLength(0);
     await publishPublicIncidentUpdates({
-      ownerId: String(new Types.ObjectId()),
+      workspaceId: String(new Types.ObjectId()),
+      monitorId: String(monitorId),
+      incidentId: String(incidentId),
+      eventType: "incident.opened",
+    });
+    expect(published.events).toHaveLength(0);
+  });
+
+  it("publishes nothing for deleted workspaces", async () => {
+    workspaceStores.workspaces.docs[0]!.status = "deleted";
+    await publishPublicIncidentUpdates({
+      workspaceId: String(workspaceId),
       monitorId: String(monitorId),
       incidentId: String(incidentId),
       eventType: "incident.opened",
@@ -370,7 +406,7 @@ describe("publishing public updates after persisted incident changes", () => {
   it("publishes a refreshed status when a monitor is paused or resumed", async () => {
     incidents.docs.length = 0;
     (monitors.docs[0] as Record<string, unknown>).active = false;
-    await publishPublicStatusForMonitor(String(owner), String(monitorId));
+    await publishPublicStatusForMonitor(String(workspaceId), String(monitorId));
     expect(published.events).toHaveLength(1);
     expect(published.events[0]?.type).toBe("public.status.updated");
     const status = published.events[0]?.payload.payload as {

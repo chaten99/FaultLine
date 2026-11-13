@@ -49,7 +49,7 @@ export const processMonitorCheckJob = async (job: Job<MonitorCheckJobData>): Pro
           },
         );
         await publishDomainEvent("monitor.check.failed", {
-          userId: String(monitor.userId),
+          workspaceId: String(monitor.workspaceId),
           payload: {
             monitorId: String(monitor._id),
             runId: job.data.runId,
@@ -87,7 +87,7 @@ export const processMonitorCheckJob = async (job: Job<MonitorCheckJobData>): Pro
     );
 
     await publishDomainEvent("monitor.check.started", {
-      userId: String(monitor.userId),
+      workspaceId: String(monitor.workspaceId),
       payload: {
         monitorId: String(monitor._id),
         runId,
@@ -151,7 +151,7 @@ export const processMonitorCheckJob = async (job: Job<MonitorCheckJobData>): Pro
     await publishDomainEvent(
       terminalStatus === "success" ? "monitor.check.completed" : "monitor.check.failed",
       {
-        userId: String(monitor.userId),
+        workspaceId: String(monitor.workspaceId),
         payload: {
           monitorId: String(monitor._id),
           runId,
@@ -243,7 +243,7 @@ export const createMonitorCheckWorker = (): Worker<MonitorCheckJobData> => {
           },
         );
         await publishDomainEvent("monitor.check.failed", {
-          userId: String(monitor.userId),
+          workspaceId: String(monitor.workspaceId),
           payload: {
             monitorId: String(monitor._id),
             runId,

@@ -6,6 +6,7 @@ export type MonitorInterval = (typeof monitorIntervals)[number];
 const monitorSchema = new Schema(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    workspaceId: { type: Schema.Types.ObjectId, ref: "Workspace", required: true },
     name: { type: String, required: true, trim: true, maxlength: 100 },
     url: { type: String, required: true, trim: true, maxlength: 2048 },
     method: { type: String, enum: ["GET"], required: true, default: "GET" },
@@ -40,8 +41,8 @@ const monitorSchema = new Schema(
   { timestamps: true },
 );
 
-monitorSchema.index({ userId: 1, createdAt: -1 });
-monitorSchema.index({ userId: 1, active: 1, createdAt: -1 });
-monitorSchema.index({ userId: 1, name: 1 });
-monitorSchema.index({ userId: 1, intervalSeconds: 1, createdAt: -1 });
+monitorSchema.index({ workspaceId: 1, createdAt: -1 });
+monitorSchema.index({ workspaceId: 1, active: 1, createdAt: -1 });
+monitorSchema.index({ workspaceId: 1, name: 1 });
+monitorSchema.index({ workspaceId: 1, intervalSeconds: 1, createdAt: -1 });
 export const Monitor = model("Monitor", monitorSchema);
