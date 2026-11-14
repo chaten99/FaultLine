@@ -17,6 +17,9 @@ import { StatusPageService } from "../src/modules/status-pages/status-page-servi
 import { StatusPageSubscriber } from "../src/modules/status-pages/status-page-subscriber.model.js";
 import { createUnsubscribeToken } from "../src/modules/status-pages/status-page-subscriber.service.js";
 import { PublicStatusPage } from "../src/modules/status-pages/status-page.model.js";
+import { createWorkspaceWithOwner } from "../src/modules/workspaces/workspace-core.service.js";
+import { WorkspaceMember } from "../src/modules/workspaces/workspace-member.model.js";
+import { Workspace } from "../src/modules/workspaces/workspace.model.js";
 import { invalidateStatusCache } from "../src/modules/status-pages/status-page-snapshot.service.js";
 
 const baseUri = process.env.ANALYTICS_TEST_MONGODB_URI;
@@ -65,6 +68,10 @@ describe.skipIf(!uri)("status pages against MongoDB", () => {
   const stranger = new Types.ObjectId();
   const ownerToken = createAccessToken(String(owner));
   const strangerToken = createAccessToken(String(stranger));
+  const viewer = new Types.ObjectId();
+  const viewerToken = createAccessToken(String(viewer));
+  let ownerWorkspace = new Types.ObjectId();
+  let strangerWorkspace = new Types.ObjectId();
   const apiMonitor = new Types.ObjectId();
   const webMonitor = new Types.ObjectId();
   const foreignMonitor = new Types.ObjectId();
@@ -72,6 +79,7 @@ describe.skipIf(!uri)("status pages against MongoDB", () => {
 
   const monitorDoc = (id: Types.ObjectId, userId: Types.ObjectId, name: string) => ({
     _id: id,
+    workspaceId: userId === stranger ? strangerWorkspace : ownerWorkspace,
     userId,
     name,
     url: `https://${name.toLowerCase()}.example.test/health?token=SECRET`,
@@ -101,7 +109,10 @@ describe.skipIf(!uri)("status pages against MongoDB", () => {
     updatedAt: new Date(),
   });
 
-  const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+  const auth = (token: string) => ({
+    Authorization: `Bearer ${token}`,
+    "X-Workspace-Id": String(token === strangerToken ? strangerWorkspace : ownerWorkspace),
+  });
   const publicStatus = () => {
     invalidateStatusCache();
     return request(app).get("/api/public/status-pages/live-status");
@@ -116,6 +127,22 @@ describe.skipIf(!uri)("status pages against MongoDB", () => {
       StatusPageSubscriber.syncIndexes(),
       StatusPageDelivery.syncIndexes(),
     ]);
+    ownerWorkspace = (
+      await createWorkspaceWithOwner({ name: "Owner Team", type: "team", userId: String(owner) })
+    )._id;
+    strangerWorkspace = (
+      await createWorkspaceWithOwner({
+        name: "Stranger Team",
+        type: "team",
+        userId: String(stranger),
+      })
+    )._id;
+    await WorkspaceMember.create({
+      workspaceId: ownerWorkspace,
+      userId: viewer,
+      role: "viewer",
+      status: "active",
+    });
     await Monitor.collection.insertMany([
       monitorDoc(apiMonitor, owner, "Api"),
       monitorDoc(webMonitor, owner, "Web"),
@@ -190,6 +217,7 @@ describe.skipIf(!uri)("status pages against MongoDB", () => {
     expect(JSON.stringify(operational.body)).not.toMatch(/SECRET|example\.test|userId|ownerId/);
 
     const incident = await Incident.collection.insertOne({
+      workspaceId: ownerWorkspace,
       monitorId: apiMonitor,
       userId: owner,
       title: "Incident on Api: TIMEOUT",
@@ -264,6 +292,7 @@ describe.skipIf(!uri)("status pages against MongoDB", () => {
       eventId: "incident.opened:integration",
       type: "incident.opened",
       userId: owner,
+      workspaceId: ownerWorkspace,
       incidentId: new Types.ObjectId(),
       snapshot: {
         incidentId: String(new Types.ObjectId()),
@@ -305,6 +334,36 @@ describe.skipIf(!uri)("status pages against MongoDB", () => {
         eventId: "incident.opened:after",
       } as INotificationOutbox),
     ).toBe(0);
+  });
+
+  it("enforces roles and workspace boundaries with real memberships", async () => {
+    const viewerHeaders = {
+      Authorization: `Bearer ${viewerToken}`,
+      "X-Workspace-Id": String(ownerWorkspace),
+    };
+    await request(app).get(`/api/status-pages/${pageId}`).set(viewerHeaders).expect(200);
+    const denied = await request(app)
+      .patch(`/api/status-pages/${pageId}`)
+      .set(viewerHeaders)
+      .send({ name: "Viewer edit" })
+      .expect(403);
+    expect(denied.body.code).toBe("INSUFFICIENT_PERMISSIONS");
+    await request(app).post(`/api/status-pages/${pageId}/unpublish`).set(viewerHeaders).expect(403);
+    const outsider = await request(app)
+      .get(`/api/status-pages/${pageId}`)
+      .set({ Authorization: `Bearer ${strangerToken}`, "X-Workspace-Id": String(ownerWorkspace) });
+    expect(outsider.status).toBe(404);
+    expect(outsider.body.code).toBe("WORKSPACE_NOT_FOUND");
+    await request(app).get(`/api/status-pages/${pageId}`).set(auth(strangerToken)).expect(404);
+  });
+
+  it("hides the public page when its workspace is deleted and restores it when active", async () => {
+    await publicStatus().expect(200);
+    await Workspace.updateOne({ _id: ownerWorkspace }, { $set: { status: "deleted" } });
+    await publicStatus().expect(404);
+    await request(app).get("/api/public/status-pages/live-status/incidents").expect(404);
+    await Workspace.updateOne({ _id: ownerWorkspace }, { $set: { status: "active" } });
+    await publicStatus().expect(200);
   });
 
   it("makes unpublished and deleted pages inaccessible and removes their data", async () => {

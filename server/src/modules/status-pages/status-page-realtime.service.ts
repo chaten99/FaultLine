@@ -4,6 +4,7 @@ import { publishDomainEvent } from "../../lib/redis/redis.service.js";
 import { Incident } from "../incidents/incident.model.js";
 import type { IncidentEventType } from "../notifications/notification.types.js";
 import { StatusPageService } from "./status-page-service.model.js";
+import { Workspace } from "../workspaces/workspace.model.js";
 import { PublicStatusPage, type IPublicStatusPage } from "./status-page.model.js";
 import {
   buildStatusSnapshot,
@@ -35,12 +36,12 @@ export const loadServiceLites = async (pageId: string): Promise<ServiceLite[]> =
 };
 
 export const publishPageStatusUpdate = async (
-  page: Pick<IPublicStatusPage, "_id" | "ownerId">,
+  page: Pick<IPublicStatusPage, "_id" | "workspaceId">,
 ): Promise<void> => {
   const pageId = String(page._id);
   invalidateStatusCache(pageId);
   const services = await loadServiceLites(pageId);
-  const snapshot = await buildStatusSnapshot(String(page.ownerId), services, Date.now());
+  const snapshot = await buildStatusSnapshot(String(page.workspaceId), services, Date.now());
   await publishDomainEvent("public.status.updated", { pageId, payload: snapshot.status });
 };
 
@@ -56,11 +57,11 @@ const incidentEventNames: Record<IncidentEventType, string> = {
 };
 
 export const findPublishedPagesForMonitor = async (
-  ownerId: string,
+  workspaceId: string,
   monitorId: string,
 ): Promise<IPublicStatusPage[]> => {
   const services = await StatusPageService.find({
-    ownerId: new Types.ObjectId(ownerId),
+    workspaceId: new Types.ObjectId(workspaceId),
     enabled: true,
     monitorIds: new Types.ObjectId(monitorId),
   })
@@ -68,20 +69,25 @@ export const findPublishedPagesForMonitor = async (
     .lean();
   const pageIds = [...new Set(services.map((service) => String(service.pageId)))];
   if (pageIds.length === 0) return [];
+  const active = await Workspace.findOne({ _id: new Types.ObjectId(workspaceId), status: "active" })
+    .select("_id")
+    .lean();
+  if (!active) return [];
   return PublicStatusPage.find({
     _id: { $in: pageIds.map((id) => new Types.ObjectId(id)) },
+    workspaceId: new Types.ObjectId(workspaceId),
     status: "published",
   }).lean() as unknown as Promise<IPublicStatusPage[]>;
 };
 
 export const publishPublicIncidentUpdates = async (input: {
-  ownerId: string;
+  workspaceId: string;
   monitorId: string;
   incidentId: string;
   eventType: IncidentEventType;
 }): Promise<void> => {
   try {
-    const pages = await findPublishedPagesForMonitor(input.ownerId, input.monitorId);
+    const pages = await findPublishedPagesForMonitor(input.workspaceId, input.monitorId);
     if (pages.length === 0) return;
     const incident = await Incident.findById(input.incidentId)
       .select("monitorId status firstFailureAt openedAt acknowledgedAt resolvedAt")
@@ -92,7 +98,7 @@ export const publishPublicIncidentUpdates = async (input: {
       invalidateStatusCache(pageId);
       const services = await loadServiceLites(pageId);
       const names = serviceNamesByMonitor(services).get(input.monitorId) ?? [];
-      const snapshot = await buildStatusSnapshot(String(page.ownerId), services, Date.now());
+      const snapshot = await buildStatusSnapshot(String(page.workspaceId), services, Date.now());
       await publishDomainEvent(incidentEventNames[input.eventType], {
         pageId,
         payload: toPublicIncident(
@@ -119,11 +125,11 @@ export const publishPublicIncidentUpdates = async (input: {
 };
 
 export const publishPublicStatusForMonitor = async (
-  ownerId: string,
+  workspaceId: string,
   monitorId: string,
 ): Promise<void> => {
   try {
-    const pages = await findPublishedPagesForMonitor(ownerId, monitorId);
+    const pages = await findPublishedPagesForMonitor(workspaceId, monitorId);
     for (const page of pages) await publishPageStatusUpdate(page);
   } catch (error) {
     logger.warn({ err: error, monitorId }, "Public status refresh failed");

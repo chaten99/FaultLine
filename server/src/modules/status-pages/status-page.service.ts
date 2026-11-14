@@ -2,6 +2,7 @@ import { Types } from "mongoose";
 import { createApiError } from "../../lib/errors/create-api-error.js";
 import { getScopedAvailability } from "../analytics/analytics.service.js";
 import { Monitor } from "../monitors/monitor.model.js";
+import type { WorkspaceContext } from "../workspaces/workspace.types.js";
 import { StatusPageService } from "./status-page-service.model.js";
 import { StatusPageDelivery } from "./status-page-delivery.model.js";
 import { StatusPageSubscriber } from "./status-page-subscriber.model.js";
@@ -32,11 +33,14 @@ const maxServices = 20;
 
 type PageDoc = IPublicStatusPage;
 
-const findOwnedPage = async (ownerId: string, id: string): Promise<PageDoc> => {
+const findOwnedPage = async (workspaceId: string, id: string): Promise<PageDoc> => {
   if (!Types.ObjectId.isValid(id)) {
     throw createApiError("Status page not found.", 404, "STATUS_PAGE_NOT_FOUND");
   }
-  const page = await PublicStatusPage.findOne({ _id: id, ownerId: new Types.ObjectId(ownerId) });
+  const page = await PublicStatusPage.findOne({
+    _id: id,
+    workspaceId: new Types.ObjectId(workspaceId),
+  });
   if (!page) throw createApiError("Status page not found.", 404, "STATUS_PAGE_NOT_FOUND");
   return page as unknown as PageDoc;
 };
@@ -67,9 +71,9 @@ const toSummary = (page: PageDoc, serviceCount: number, overall: PublicStatus) =
   publishedAt: iso(page.publishedAt),
 });
 
-const buildServiceDetails = async (ownerId: string, rows: ServiceRow[]) => {
+const buildServiceDetails = async (workspaceId: string, rows: ServiceRow[]) => {
   const lites = rows.map(toServiceLite);
-  const { blocks, monitors } = await computeServiceBlocks(ownerId, lites, Date.now());
+  const { blocks, monitors } = await computeServiceBlocks(workspaceId, lites, Date.now());
   const states = monitorStateMap(monitors, Date.now());
   return rows.map((row) => {
     const lite = toServiceLite(row);
@@ -116,7 +120,7 @@ const loadServiceRows = async (pageId: string): Promise<ServiceRow[]> =>
 
 const toDetail = async (page: PageDoc) => {
   const rows = await loadServiceRows(String(page._id));
-  const services = await buildServiceDetails(String(page.ownerId), rows);
+  const services = await buildServiceDetails(String(page.workspaceId), rows);
   const overall = aggregateOverall(
     services.filter((service) => service.enabled).map((service) => service.status),
   );
@@ -131,8 +135,9 @@ const toDetail = async (page: PageDoc) => {
   };
 };
 
-export const listStatusPages = async (ownerId: string) => {
-  const pages = (await PublicStatusPage.find({ ownerId: new Types.ObjectId(ownerId) })
+export const listStatusPages = async (ctx: WorkspaceContext) => {
+  const { workspaceId } = ctx;
+  const pages = (await PublicStatusPage.find({ workspaceId: new Types.ObjectId(workspaceId) })
     .sort({ createdAt: -1 })
     .limit(maxPages)
     .lean()) as unknown as PageDoc[];
@@ -140,7 +145,7 @@ export const listStatusPages = async (ownerId: string) => {
     pages.map(async (page) => {
       const rows = await loadServiceRows(String(page._id));
       const enabled = rows.filter((row) => row.enabled).map(toServiceLite);
-      const { blocks } = await computeServiceBlocks(ownerId, enabled, Date.now());
+      const { blocks } = await computeServiceBlocks(workspaceId, enabled, Date.now());
       const overall = aggregateOverall([...blocks.values()].map((block) => block.status));
       return toSummary(page, rows.length, overall);
     }),
@@ -176,8 +181,11 @@ type CreateInput = {
   subscribersEnabled?: boolean;
 };
 
-export const createStatusPage = async (ownerId: string, input: CreateInput) => {
-  const count = await PublicStatusPage.countDocuments({ ownerId: new Types.ObjectId(ownerId) });
+export const createStatusPage = async (ctx: WorkspaceContext, input: CreateInput) => {
+  const { workspaceId } = ctx;
+  const count = await PublicStatusPage.countDocuments({
+    workspaceId: new Types.ObjectId(workspaceId),
+  });
   if (count >= maxPages) {
     throw createApiError(
       `You can create up to ${maxPages} status pages.`,
@@ -187,7 +195,8 @@ export const createStatusPage = async (ownerId: string, input: CreateInput) => {
   }
   try {
     const page = await PublicStatusPage.create({
-      ownerId: new Types.ObjectId(ownerId),
+      workspaceId: new Types.ObjectId(workspaceId),
+      ownerId: new Types.ObjectId(ctx.userId),
       name: input.name,
       slug: input.slug,
       description: input.description ?? "",
@@ -205,8 +214,8 @@ export const createStatusPage = async (ownerId: string, input: CreateInput) => {
   }
 };
 
-export const getStatusPage = async (ownerId: string, id: string) => ({
-  page: await toDetail(await findOwnedPage(ownerId, id)),
+export const getStatusPage = async (ctx: WorkspaceContext, id: string) => ({
+  page: await toDetail(await findOwnedPage(ctx.workspaceId, id)),
 });
 
 type UpdateInput = {
@@ -218,8 +227,9 @@ type UpdateInput = {
   subscriberEvents?: Partial<SubscriberEvents>;
 };
 
-export const updateStatusPage = async (ownerId: string, id: string, input: UpdateInput) => {
-  const page = await findOwnedPage(ownerId, id);
+export const updateStatusPage = async (ctx: WorkspaceContext, id: string, input: UpdateInput) => {
+  const { workspaceId } = ctx;
+  const page = await findOwnedPage(workspaceId, id);
   const set: Record<string, unknown> = {};
   if (input.name !== undefined) set.name = input.name;
   if (input.slug !== undefined) set.slug = input.slug;
@@ -235,7 +245,7 @@ export const updateStatusPage = async (ownerId: string, id: string, input: Updat
   }
   try {
     const updated = await PublicStatusPage.findOneAndUpdate(
-      { _id: page._id, ownerId: new Types.ObjectId(ownerId) },
+      { _id: page._id, workspaceId: new Types.ObjectId(workspaceId) },
       { $set: set },
       { new: true },
     );
@@ -248,10 +258,11 @@ export const updateStatusPage = async (ownerId: string, id: string, input: Updat
   }
 };
 
-export const deleteStatusPage = async (ownerId: string, id: string) => {
-  const page = await findOwnedPage(ownerId, id);
+export const deleteStatusPage = async (ctx: WorkspaceContext, id: string) => {
+  const { workspaceId } = ctx;
+  const page = await findOwnedPage(workspaceId, id);
   const pageId = String(page._id);
-  await PublicStatusPage.deleteOne({ _id: page._id, ownerId: new Types.ObjectId(ownerId) });
+  await PublicStatusPage.deleteOne({ _id: page._id, workspaceId: new Types.ObjectId(workspaceId) });
   await StatusPageService.deleteMany({ pageId: page._id });
   await StatusPageSubscriber.deleteMany({ pageId: page._id });
   await StatusPageDelivery.deleteMany({ pageId: page._id });
@@ -259,8 +270,9 @@ export const deleteStatusPage = async (ownerId: string, id: string) => {
   return { status: "ok" as const };
 };
 
-export const publishStatusPage = async (ownerId: string, id: string) => {
-  const page = await findOwnedPage(ownerId, id);
+export const publishStatusPage = async (ctx: WorkspaceContext, id: string) => {
+  const { workspaceId } = ctx;
+  const page = await findOwnedPage(workspaceId, id);
   const services = await loadServiceLites(String(page._id));
   if (!services.some((service) => service.enabled && service.monitorIds.length > 0)) {
     throw createApiError(
@@ -270,7 +282,7 @@ export const publishStatusPage = async (ownerId: string, id: string) => {
     );
   }
   const updated = await PublicStatusPage.findOneAndUpdate(
-    { _id: page._id, ownerId: new Types.ObjectId(ownerId) },
+    { _id: page._id, workspaceId: new Types.ObjectId(workspaceId) },
     { $set: { status: "published", publishedAt: new Date() } },
     { new: true },
   );
@@ -280,10 +292,11 @@ export const publishStatusPage = async (ownerId: string, id: string) => {
   return { page: await toDetail(updated as unknown as PageDoc) };
 };
 
-export const unpublishStatusPage = async (ownerId: string, id: string) => {
-  const page = await findOwnedPage(ownerId, id);
+export const unpublishStatusPage = async (ctx: WorkspaceContext, id: string) => {
+  const { workspaceId } = ctx;
+  const page = await findOwnedPage(workspaceId, id);
   const updated = await PublicStatusPage.findOneAndUpdate(
-    { _id: page._id, ownerId: new Types.ObjectId(ownerId) },
+    { _id: page._id, workspaceId: new Types.ObjectId(workspaceId) },
     { $set: { status: "unpublished" } },
     { new: true },
   );
@@ -292,11 +305,11 @@ export const unpublishStatusPage = async (ownerId: string, id: string) => {
   return { page: await toDetail(updated as unknown as PageDoc) };
 };
 
-const assertOwnedMonitors = async (ownerId: string, monitorIds: string[]) => {
+const assertOwnedMonitors = async (workspaceId: string, monitorIds: string[]) => {
   if (monitorIds.length === 0) return;
   const owned = await Monitor.find({
     _id: { $in: monitorIds.map((monitorId) => new Types.ObjectId(monitorId)) },
-    userId: new Types.ObjectId(ownerId),
+    workspaceId: new Types.ObjectId(workspaceId),
   })
     .select("_id")
     .lean();
@@ -315,17 +328,19 @@ const notifyIfPublished = async (page: PageDoc) => {
   if (page.status === "published") await publishPageStatusUpdate(page);
 };
 
-export const listServices = async (ownerId: string, id: string) => {
-  const page = await findOwnedPage(ownerId, id);
-  return { items: await buildServiceDetails(ownerId, await loadServiceRows(String(page._id))) };
+export const listServices = async (ctx: WorkspaceContext, id: string) => {
+  const { workspaceId } = ctx;
+  const page = await findOwnedPage(workspaceId, id);
+  return { items: await buildServiceDetails(workspaceId, await loadServiceRows(String(page._id))) };
 };
 
 export const createService = async (
-  ownerId: string,
+  ctx: WorkspaceContext,
   id: string,
   input: { name: string; description?: string; monitorIds: string[]; enabled?: boolean },
 ) => {
-  const page = await findOwnedPage(ownerId, id);
+  const { workspaceId } = ctx;
+  const page = await findOwnedPage(workspaceId, id);
   const rows = await loadServiceRows(String(page._id));
   if (rows.length >= maxServices) {
     throw createApiError(
@@ -334,10 +349,11 @@ export const createService = async (
       "SERVICE_LIMIT_REACHED",
     );
   }
-  await assertOwnedMonitors(ownerId, input.monitorIds);
+  await assertOwnedMonitors(workspaceId, input.monitorIds);
   const created = await StatusPageService.create({
     pageId: page._id,
-    ownerId: new Types.ObjectId(ownerId),
+    workspaceId: new Types.ObjectId(workspaceId),
+    ownerId: new Types.ObjectId(ctx.userId),
     name: input.name,
     description: input.description ?? "",
     monitorIds: input.monitorIds.map((monitorId) => new Types.ObjectId(monitorId)),
@@ -345,60 +361,66 @@ export const createService = async (
     enabled: input.enabled ?? true,
   });
   await notifyIfPublished(page);
-  const [service] = await buildServiceDetails(ownerId, [created as unknown as ServiceRow]);
+  const [service] = await buildServiceDetails(workspaceId, [created as unknown as ServiceRow]);
   return { service };
 };
 
-const findOwnedService = async (ownerId: string, pageId: string, serviceId: string) => {
+const findOwnedService = async (workspaceId: string, pageId: string, serviceId: string) => {
   if (!Types.ObjectId.isValid(serviceId)) {
     throw createApiError("Service not found.", 404, "SERVICE_NOT_FOUND");
   }
   const service = await StatusPageService.findOne({
     _id: serviceId,
     pageId: new Types.ObjectId(pageId),
-    ownerId: new Types.ObjectId(ownerId),
+    workspaceId: new Types.ObjectId(workspaceId),
   });
   if (!service) throw createApiError("Service not found.", 404, "SERVICE_NOT_FOUND");
   return service;
 };
 
 export const updateService = async (
-  ownerId: string,
+  ctx: WorkspaceContext,
   id: string,
   serviceId: string,
   input: { name?: string; description?: string; monitorIds?: string[]; enabled?: boolean },
 ) => {
-  const page = await findOwnedPage(ownerId, id);
-  const service = await findOwnedService(ownerId, String(page._id), serviceId);
+  const { workspaceId } = ctx;
+  const page = await findOwnedPage(workspaceId, id);
+  const service = await findOwnedService(workspaceId, String(page._id), serviceId);
   const set: Record<string, unknown> = {};
   if (input.name !== undefined) set.name = input.name;
   if (input.description !== undefined) set.description = input.description;
   if (input.enabled !== undefined) set.enabled = input.enabled;
   if (input.monitorIds !== undefined) {
-    await assertOwnedMonitors(ownerId, input.monitorIds);
+    await assertOwnedMonitors(workspaceId, input.monitorIds);
     set.monitorIds = input.monitorIds.map((monitorId) => new Types.ObjectId(monitorId));
   }
   const updated = await StatusPageService.findOneAndUpdate(
-    { _id: service._id, ownerId: new Types.ObjectId(ownerId) },
+    { _id: service._id, workspaceId: new Types.ObjectId(workspaceId) },
     { $set: set },
     { new: true },
   );
   if (!updated) throw createApiError("Service not found.", 404, "SERVICE_NOT_FOUND");
   await notifyIfPublished(page);
-  const [detail] = await buildServiceDetails(ownerId, [updated as unknown as ServiceRow]);
+  const [detail] = await buildServiceDetails(workspaceId, [updated as unknown as ServiceRow]);
   return { service: detail };
 };
 
-export const deleteService = async (ownerId: string, id: string, serviceId: string) => {
-  const page = await findOwnedPage(ownerId, id);
-  const service = await findOwnedService(ownerId, String(page._id), serviceId);
-  await StatusPageService.deleteOne({ _id: service._id, ownerId: new Types.ObjectId(ownerId) });
+export const deleteService = async (ctx: WorkspaceContext, id: string, serviceId: string) => {
+  const { workspaceId } = ctx;
+  const page = await findOwnedPage(workspaceId, id);
+  const service = await findOwnedService(workspaceId, String(page._id), serviceId);
+  await StatusPageService.deleteOne({
+    _id: service._id,
+    workspaceId: new Types.ObjectId(workspaceId),
+  });
   await notifyIfPublished(page);
   return { status: "ok" as const };
 };
 
-export const reorderServices = async (ownerId: string, id: string, serviceIds: string[]) => {
-  const page = await findOwnedPage(ownerId, id);
+export const reorderServices = async (ctx: WorkspaceContext, id: string, serviceIds: string[]) => {
+  const { workspaceId } = ctx;
+  const page = await findOwnedPage(workspaceId, id);
   const rows = await loadServiceRows(String(page._id));
   const existing = new Set(rows.map((row) => String(row._id)));
   const requested = new Set(serviceIds);
@@ -416,17 +438,18 @@ export const reorderServices = async (ownerId: string, id: string, serviceIds: s
       {
         _id: new Types.ObjectId(serviceId),
         pageId: page._id,
-        ownerId: new Types.ObjectId(ownerId),
+        workspaceId: new Types.ObjectId(workspaceId),
       },
       { $set: { order: index } },
     );
   }
   await notifyIfPublished(page);
-  return { items: await buildServiceDetails(ownerId, await loadServiceRows(String(page._id))) };
+  return { items: await buildServiceDetails(workspaceId, await loadServiceRows(String(page._id))) };
 };
 
-export const getMonitorOptions = async (ownerId: string, search?: string) => {
-  const filter: Record<string, unknown> = { userId: new Types.ObjectId(ownerId) };
+export const getMonitorOptions = async (ctx: WorkspaceContext, search?: string) => {
+  const { workspaceId } = ctx;
+  const filter: Record<string, unknown> = { workspaceId: new Types.ObjectId(workspaceId) };
   if (search?.trim()) {
     const escaped = search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     filter.$or = [
@@ -440,7 +463,7 @@ export const getMonitorOptions = async (ownerId: string, search?: string) => {
     .select("name url active")
     .lean();
   const snapshots = await loadMonitorSnapshots(
-    ownerId,
+    workspaceId,
     rows.map((row) => String(row._id)),
   );
   const states = monitorStateMap(snapshots, Date.now());
@@ -455,12 +478,13 @@ export const getMonitorOptions = async (ownerId: string, search?: string) => {
   };
 };
 
-export const previewStatusPage = async (ownerId: string, id: string) => {
-  const page = await findOwnedPage(ownerId, id);
+export const previewStatusPage = async (ctx: WorkspaceContext, id: string) => {
+  const { workspaceId } = ctx;
+  const page = await findOwnedPage(workspaceId, id);
   const services = await loadServiceLites(String(page._id));
-  const snapshot = await buildStatusSnapshot(ownerId, services, Date.now());
+  const snapshot = await buildStatusSnapshot(workspaceId, services, Date.now());
   const recent = await listPublicIncidents(
-    ownerId,
+    workspaceId,
     services,
     { status: "resolved", page: 1, pageSize: 20 },
     Date.now(),
@@ -481,11 +505,12 @@ export const countSubscribers = async (pageId: Types.ObjectId) => {
 };
 
 export const listSubscribers = async (
-  ownerId: string,
+  ctx: WorkspaceContext,
   id: string,
   query: { page: number; pageSize: number; status: "all" | "pending" | "active" | "unsubscribed" },
 ) => {
-  const page = await findOwnedPage(ownerId, id);
+  const { workspaceId } = ctx;
+  const page = await findOwnedPage(workspaceId, id);
   const filter: Record<string, unknown> = { pageId: page._id };
   if (query.status !== "all") filter.status = query.status;
   const [items, total, counts] = await Promise.all([
@@ -514,19 +539,24 @@ export const listSubscribers = async (
   };
 };
 
-export const getStatusPageAnalytics = async (ownerId: string, id: string, now = new Date()) => {
-  const page = await findOwnedPage(ownerId, id);
+export const getStatusPageAnalytics = async (
+  ctx: WorkspaceContext,
+  id: string,
+  now = new Date(),
+) => {
+  const { workspaceId } = ctx;
+  const page = await findOwnedPage(workspaceId, id);
   const services = (await loadServiceLites(String(page._id))).filter(
     (service: ServiceLite) => service.enabled,
   );
-  const snapshot = await buildStatusSnapshot(ownerId, services, now.getTime());
+  const snapshot = await buildStatusSnapshot(workspaceId, services, now.getTime());
   const all = [...new Set(services.flatMap((service) => service.monitorIds))];
   const [overall, perService, subscribers] = await Promise.all([
-    getScopedAvailability(ownerId, all, { range: "30d" }, now),
+    getScopedAvailability(workspaceId, all, { range: "30d" }, now),
     Promise.all(
       services.map(async (service) => ({
         service,
-        result: await getScopedAvailability(ownerId, service.monitorIds, { range: "30d" }, now),
+        result: await getScopedAvailability(workspaceId, service.monitorIds, { range: "30d" }, now),
       })),
     ),
     countSubscribers(page._id),

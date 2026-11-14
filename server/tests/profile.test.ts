@@ -12,6 +12,11 @@ import { User } from "../src/modules/auth/user.model.js";
 import { Incident } from "../src/modules/incidents/incident.model.js";
 import { Monitor } from "../src/modules/monitors/monitor.model.js";
 import { bindMemoryModel } from "./helpers/memory-model.js";
+import {
+  bindWorkspaceModels,
+  resetWorkspaceModels,
+  seedWorkspace,
+} from "./helpers/workspace-fixtures.js";
 
 const redis = vi.hoisted(() => {
   const counts = new Map<string, number>();
@@ -41,6 +46,11 @@ const users = bindMemoryModel(User);
 const families = bindMemoryModel(RefreshTokenFamily);
 const monitors = bindMemoryModel(Monitor);
 const incidents = bindMemoryModel(Incident);
+const workspaceStores = bindWorkspaceModels();
+const wsA = new Types.ObjectId();
+const wsB = new Types.ObjectId();
+const wsGone = new Types.ObjectId();
+const wsRemoved = new Types.ObjectId();
 
 const userA = new Types.ObjectId();
 const userB = new Types.ObjectId();
@@ -67,6 +77,28 @@ const newSession = async (userId: Types.ObjectId, userAgent?: string) => {
 
 beforeEach(async () => {
   [users, families, monitors, incidents].forEach((store) => store.reset());
+  resetWorkspaceModels(workspaceStores);
+  seedWorkspace(workspaceStores, { ownerId: userA, id: wsA, type: "personal" });
+  seedWorkspace(workspaceStores, {
+    ownerId: userB,
+    id: wsB,
+    members: [{ userId: userA, role: "viewer" }],
+  });
+  seedWorkspace(workspaceStores, {
+    ownerId: new Types.ObjectId(),
+    id: wsRemoved,
+    members: [{ userId: userA, role: "member" }],
+  });
+  workspaceStores.members.docs.find(
+    (doc) => String(doc.workspaceId) === String(wsRemoved) && String(doc.userId) === String(userA),
+  )!.status = "removed";
+  seedWorkspace(workspaceStores, {
+    ownerId: new Types.ObjectId(),
+    id: wsGone,
+    members: [{ userId: userA, role: "member" }],
+  });
+  workspaceStores.workspaces.docs.find((doc) => String(doc._id) === String(wsGone))!.status =
+    "deleted";
   redis.counts.clear();
   passwordHash ||= await argon2.hash(password, { type: argon2.argon2id });
   users.docs.push(
@@ -118,17 +150,20 @@ describe("profile", () => {
     await request(app).patch("/api/profile").send({ name: "x" }).expect(401);
   });
 
-  it("returns the account, verification state and live stats without secrets", async () => {
+  it("returns the account and live stats across every workspace the user belongs to", async () => {
     monitors.docs.push(
-      { _id: new Types.ObjectId(), userId: userA, active: true },
-      { _id: new Types.ObjectId(), userId: userA, active: false },
-      { _id: new Types.ObjectId(), userId: userB, active: true },
+      { _id: new Types.ObjectId(), workspaceId: wsA, userId: userA, active: true },
+      { _id: new Types.ObjectId(), workspaceId: wsA, userId: userA, active: false },
+      { _id: new Types.ObjectId(), workspaceId: wsB, userId: userB, active: true },
+      { _id: new Types.ObjectId(), workspaceId: wsRemoved, userId: userB, active: true },
+      { _id: new Types.ObjectId(), workspaceId: wsGone, userId: userB, active: true },
     );
     incidents.docs.push(
-      { _id: new Types.ObjectId(), userId: userA, status: "open" },
-      { _id: new Types.ObjectId(), userId: userA, status: "acknowledged" },
-      { _id: new Types.ObjectId(), userId: userA, status: "resolved" },
-      { _id: new Types.ObjectId(), userId: userB, status: "open" },
+      { _id: new Types.ObjectId(), workspaceId: wsA, userId: userA, status: "open" },
+      { _id: new Types.ObjectId(), workspaceId: wsA, userId: userA, status: "acknowledged" },
+      { _id: new Types.ObjectId(), workspaceId: wsA, userId: userA, status: "resolved" },
+      { _id: new Types.ObjectId(), workspaceId: wsB, userId: userB, status: "open" },
+      { _id: new Types.ObjectId(), workspaceId: wsRemoved, userId: userB, status: "open" },
     );
     const response = await request(app).get("/api/profile").set(auth(tokenA)).expect(200);
     expect(response.body.user).toEqual({
@@ -138,13 +173,27 @@ describe("profile", () => {
       emailVerified: true,
       createdAt: "2026-01-01T00:00:00.000Z",
     });
-    expect(response.body.stats).toMatchObject({ monitors: 2, activeMonitors: 1, openIncidents: 2 });
+    expect(response.body.stats).toMatchObject({ monitors: 3, activeMonitors: 2, openIncidents: 3 });
     expect(response.headers["cache-control"]).toContain("no-store");
     expect(JSON.stringify(response.body)).not.toMatch(/passwordHash|\$argon2/);
 
     const other = await request(app).get("/api/profile").set(auth(tokenB)).expect(200);
     expect(other.body.user.emailVerified).toBe(false);
-    expect(other.body.stats).toMatchObject({ monitors: 1, openIncidents: 1 });
+    expect(other.body.stats).toMatchObject({ monitors: 1, activeMonitors: 1, openIncidents: 1 });
+  });
+
+  it("does not count workspaces the user was removed from or that were deleted", async () => {
+    monitors.docs.push(
+      { _id: new Types.ObjectId(), workspaceId: wsRemoved, userId: userB, active: true },
+      { _id: new Types.ObjectId(), workspaceId: wsGone, userId: userB, active: true },
+    );
+    const response = await request(app).get("/api/profile").set(auth(tokenA)).expect(200);
+    expect(response.body.stats.monitors).toBe(0);
+  });
+
+  it("keeps profile routes user-level without a workspace header", async () => {
+    await request(app).get("/api/profile").set(auth(tokenA)).expect(200);
+    await request(app).get("/api/auth/sessions").set(auth(tokenA)).expect(200);
   });
 
   it("updates only the caller's name with trimming and validation", async () => {

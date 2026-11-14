@@ -18,6 +18,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 import { disconnectMonitorSocket } from "@/features/monitors/realtime/monitor-socket";
 import { UserMenu } from "@/features/profile/components/user-menu";
+import { WorkspaceSwitcher } from "@/features/workspaces/components/workspace-switcher";
+import { useCan } from "@/features/workspaces/hooks/use-workspaces";
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -25,6 +27,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((state) => state.user);
   const clearSession = useAuthStore((state) => state.clearSession);
   const navigate = useNavigate();
+  const canViewAudit = useCan("audit:view");
 
   const signOut = async () => {
     try {
@@ -42,7 +45,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-background text-foreground">
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-30 w-64 border-r border-border bg-background p-5 transition-[transform,box-shadow] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform lg:translate-x-0 lg:shadow-none",
+          "fixed inset-y-0 left-0 z-30 w-64 overflow-y-auto border-r border-border bg-background p-5 pb-20 transition-[transform,box-shadow] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform lg:translate-x-0 lg:shadow-none",
           open ? "translate-x-0 shadow-2xl" : "-translate-x-full shadow-none",
         )}
       >
@@ -64,7 +67,9 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           </Tooltip>
         </div>
 
-        <nav className="mt-12 space-y-2" aria-label="Main navigation">
+        <WorkspaceSwitcher onNavigate={() => setOpen(false)} />
+
+        <nav className="mt-6 space-y-2" aria-label="Main navigation">
           <NavLink
             to="/dashboard"
             onClick={() => setOpen(false)}
@@ -152,6 +157,17 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           >
             Profile
           </NavLink>
+          <SettingsNavLink to="/settings/workspace" onNavigate={() => setOpen(false)}>
+            Workspace
+          </SettingsNavLink>
+          <SettingsNavLink to="/settings/members" onNavigate={() => setOpen(false)}>
+            Members
+          </SettingsNavLink>
+          {canViewAudit && (
+            <SettingsNavLink to="/settings/audit-log" onNavigate={() => setOpen(false)}>
+              Audit log
+            </SettingsNavLink>
+          )}
           <NavLink
             to="/settings/notifications"
             onClick={() => setOpen(false)}
@@ -169,7 +185,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         </nav>
 
         <button
-          className="absolute bottom-6 left-5 flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
+          className="absolute inset-x-0 bottom-0 flex items-center gap-2 border-t border-border bg-background px-8 py-4 text-sm text-muted-foreground hover:text-foreground"
           onClick={() => setSignOutOpen(true)}
         >
           <LogOut size={16} /> Sign out
@@ -224,5 +240,32 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         </main>
       </div>
     </div>
+  );
+}
+
+function SettingsNavLink({
+  to,
+  onNavigate,
+  children,
+}: {
+  to: string;
+  onNavigate: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <NavLink
+      to={to}
+      onClick={onNavigate}
+      className={({ isActive }) =>
+        cn(
+          "block rounded-md px-3 py-2.5 text-sm font-medium transition-all duration-150",
+          isActive
+            ? "bg-accent text-accent-foreground shadow-xs"
+            : "text-muted-foreground hover:bg-accent hover:text-foreground",
+        )
+      }
+    >
+      {children}
+    </NavLink>
   );
 }

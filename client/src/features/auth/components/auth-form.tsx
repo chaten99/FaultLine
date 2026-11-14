@@ -1,4 +1,5 @@
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { resolvePostLoginTarget } from "@/features/workspaces/lib/invitations";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
@@ -13,6 +14,7 @@ import axios from "axios";
 type Mode = "login" | "register";
 export function AuthForm({ mode }: { mode: Mode }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const setSession = useAuthStore((state) => state.setSession);
   const schema = mode === "login" ? loginSchema : registerSchema;
   type Values = { name?: string; email: string; password: string; confirmPassword?: string };
@@ -28,7 +30,8 @@ export function AuthForm({ mode }: { mode: Mode }) {
         const response = await login({ email: values.email, password: values.password });
         setSession(response.data.user, response.data.accessToken);
         toast.success("Welcome back");
-        navigate("/dashboard", { replace: true });
+        const target = resolvePostLoginTarget(location.state);
+        navigate(target.to, { replace: true, state: target.state });
       } else {
         const response = await register(
           values as { name: string; email: string; password: string; confirmPassword: string },

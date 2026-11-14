@@ -8,6 +8,13 @@ import { RefreshTokenFamily } from "../src/modules/auth/refresh-token-family.mod
 import { issueRefreshToken } from "../src/modules/auth/refresh-token.service.js";
 import { currentFamilyId } from "../src/modules/auth/session.service.js";
 import { User } from "../src/modules/auth/user.model.js";
+import { Incident } from "../src/modules/incidents/incident.model.js";
+import { Monitor } from "../src/modules/monitors/monitor.model.js";
+import {
+  createWorkspaceWithOwner,
+  ensurePersonalWorkspace,
+} from "../src/modules/workspaces/workspace-core.service.js";
+import { WorkspaceMember } from "../src/modules/workspaces/workspace-member.model.js";
 
 const baseUri = process.env.ANALYTICS_TEST_MONGODB_URI;
 const uri = baseUri
@@ -29,6 +36,9 @@ describe.skipIf(!uri)("profile and sessions against MongoDB", () => {
   const token = createAccessToken(String(userId));
   const password = "CorrectHorse1!";
   const auth = { Authorization: `Bearer ${token}` };
+  let personalId = new Types.ObjectId();
+  let sharedId = new Types.ObjectId();
+  let foreignId = new Types.ObjectId();
 
   beforeAll(async () => {
     await mongoose.connect(uri as string);
@@ -40,10 +50,85 @@ describe.skipIf(!uri)("profile and sessions against MongoDB", () => {
       passwordHash: await argon2.hash(password, { type: argon2.argon2id }),
       emailVerifiedAt: new Date(),
     });
+    await User.create({
+      _id: strangerId,
+      name: "Ben Stone",
+      email: "ben@example.com",
+      passwordHash: await argon2.hash(password, { type: argon2.argon2id }),
+      emailVerifiedAt: new Date(),
+    });
+    personalId = (await ensurePersonalWorkspace(String(userId)))._id;
+    const shared = await createWorkspaceWithOwner({
+      name: "Shared Team",
+      type: "team",
+      userId: String(strangerId),
+    });
+    sharedId = shared._id;
+    await WorkspaceMember.create({
+      workspaceId: sharedId,
+      userId,
+      role: "viewer",
+      status: "active",
+    });
+    foreignId = (
+      await createWorkspaceWithOwner({
+        name: "Foreign Team",
+        type: "team",
+        userId: String(strangerId),
+      })
+    )._id;
+    const monitorDoc = (workspaceId: Types.ObjectId, name: string, active: boolean) => ({
+      workspaceId,
+      userId: strangerId,
+      name,
+      url: "https://example.test/health",
+      method: "GET",
+      intervalSeconds: 60,
+      timeoutMs: 10000,
+      expectedStatusCodes: [200],
+      active,
+    });
+    const [mine, shared1, hidden] = await Monitor.insertMany([
+      monitorDoc(personalId, "Mine", true),
+      monitorDoc(sharedId, "Shared", false),
+      monitorDoc(foreignId, "Hidden", true),
+    ]);
+    await Incident.collection.insertMany([
+      {
+        workspaceId: personalId,
+        userId,
+        monitorId: mine?._id,
+        title: "t",
+        status: "open",
+        firstFailureAt: new Date(),
+        lastFailureAt: new Date(),
+        openedAt: new Date(),
+      },
+      {
+        workspaceId: sharedId,
+        userId: strangerId,
+        monitorId: shared1?._id,
+        title: "t",
+        status: "acknowledged",
+        firstFailureAt: new Date(),
+        lastFailureAt: new Date(),
+        openedAt: new Date(),
+      },
+      {
+        workspaceId: foreignId,
+        userId: strangerId,
+        monitorId: hidden?._id,
+        title: "t",
+        status: "open",
+        firstFailureAt: new Date(),
+        lastFailureAt: new Date(),
+        openedAt: new Date(),
+      },
+    ]);
     await mongoose.connection.collection("publicstatuspages").insertMany([
-      { ownerId: userId, slug: "one" },
-      { ownerId: userId, slug: "two" },
-      { ownerId: strangerId, slug: "three" },
+      { workspaceId: personalId, ownerId: userId, slug: "one" },
+      { workspaceId: sharedId, ownerId: strangerId, slug: "two" },
+      { workspaceId: foreignId, ownerId: strangerId, slug: "three" },
     ]);
   });
 
@@ -52,13 +137,13 @@ describe.skipIf(!uri)("profile and sessions against MongoDB", () => {
     await mongoose.disconnect();
   });
 
-  it("returns the profile with real counts including status pages", async () => {
+  it("returns the profile with real counts across the user's workspaces", async () => {
     const response = await request(app).get("/api/profile").set(auth).expect(200);
     expect(response.body.user).toMatchObject({ name: "Asha Rao", emailVerified: true });
     expect(response.body.stats).toEqual({
-      monitors: 0,
-      activeMonitors: 0,
-      openIncidents: 0,
+      monitors: 2,
+      activeMonitors: 1,
+      openIncidents: 2,
       statusPages: 2,
     });
     const renamed = await request(app)

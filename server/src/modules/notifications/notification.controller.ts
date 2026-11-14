@@ -1,6 +1,5 @@
 import type { Request, Response } from "express";
-import { createApiError } from "../../lib/errors/create-api-error.js";
-import type { AuthenticatedRequest } from "../auth/auth.types.js";
+import { workspaceOf } from "../workspaces/workspace-context.js";
 import {
   createSlackIntegration,
   createWebhookIntegration,
@@ -22,31 +21,22 @@ import {
   updatePreferencesSchema,
 } from "./notification.validation.js";
 
-const userId = (request: Request) => {
-  const id = (request as AuthenticatedRequest).userId;
-  if (!id) throw createApiError("Authentication required.", 401, "AUTHENTICATION_REQUIRED");
-  return id;
-};
+const ctx = (request: Request) => workspaceOf(request);
 
 export const getPreferences = async (request: Request, response: Response) =>
-  response.json(await getPreferencesView(userId(request)));
+  response.json(await getPreferencesView(ctx(request)));
 
 export const patchPreferences = async (request: Request, response: Response) =>
-  response.json(
-    await updatePreferences(userId(request), updatePreferencesSchema.parse(request.body)),
-  );
+  response.json(await updatePreferences(ctx(request), updatePreferencesSchema.parse(request.body)));
 
 export const listAllIntegrations = async (request: Request, response: Response) =>
-  response.json(await listIntegrations(userId(request)));
+  response.json(await listIntegrations(ctx(request)));
 
 export const createSlack = async (request: Request, response: Response) =>
   response
     .status(201)
     .json(
-      await createSlackIntegration(
-        userId(request),
-        createSlackIntegrationSchema.parse(request.body),
-      ),
+      await createSlackIntegration(ctx(request), createSlackIntegrationSchema.parse(request.body)),
     );
 
 export const createWebhook = async (request: Request, response: Response) =>
@@ -54,7 +44,7 @@ export const createWebhook = async (request: Request, response: Response) =>
     .status(201)
     .json(
       await createWebhookIntegration(
-        userId(request),
+        ctx(request),
         createWebhookIntegrationSchema.parse(request.body),
       ),
     );
@@ -62,37 +52,39 @@ export const createWebhook = async (request: Request, response: Response) =>
 export const patchIntegration = async (request: Request, response: Response) => {
   const { id } = idParamSchema.parse(request.params);
   return response.json(
-    await updateIntegration(userId(request), id, updateIntegrationSchema.parse(request.body)),
+    await updateIntegration(ctx(request), id, updateIntegrationSchema.parse(request.body)),
   );
 };
 
 export const rotateSecret = async (request: Request, response: Response) => {
   const { id } = idParamSchema.parse(request.params);
-  return response.json(await rotateSigningSecret(userId(request), id));
+  return response.json(await rotateSigningSecret(ctx(request), id));
 };
 
 export const removeIntegration = async (request: Request, response: Response) => {
   const { id } = idParamSchema.parse(request.params);
-  return response.json(await deleteIntegration(userId(request), id));
+  return response.json(await deleteIntegration(ctx(request), id));
 };
 
 export const sendIntegrationTest = async (request: Request, response: Response) => {
   const { id } = idParamSchema.parse(request.params);
-  return response.json(await testIntegration(userId(request), id));
+  return response.json(await testIntegration(ctx(request), id));
 };
 
 export const sendEmailTest = async (request: Request, response: Response) =>
-  response.json(await testEmail(userId(request)));
+  response.json(await testEmail(ctx(request)));
 
 export const listAllDeliveries = async (request: Request, response: Response) =>
-  response.json(await listDeliveries(userId(request), listDeliveriesSchema.parse(request.query)));
+  response.json(
+    await listDeliveries(ctx(request).workspaceId, listDeliveriesSchema.parse(request.query)),
+  );
 
 export const getOneDelivery = async (request: Request, response: Response) => {
   const { id } = idParamSchema.parse(request.params);
-  return response.json(await getDelivery(userId(request), id));
+  return response.json(await getDelivery(ctx(request).workspaceId, id));
 };
 
 export const retryOneDelivery = async (request: Request, response: Response) => {
   const { id } = idParamSchema.parse(request.params);
-  return response.json(await retryDelivery(userId(request), id));
+  return response.json(await retryDelivery(ctx(request).workspaceId, id));
 };

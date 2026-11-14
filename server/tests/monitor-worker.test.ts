@@ -54,6 +54,7 @@ describe("Monitor Check Worker", () => {
     vi.spyOn(Monitor, "findById").mockResolvedValue({
       _id: "mon-123",
       userId: "507f1f77bcf86cd799439011",
+      workspaceId: "607f1f77bcf86cd799439022",
       url: "https://example.com/api",
       timeoutMs: 5000,
       expectedStatusCodes: [200],
@@ -103,7 +104,7 @@ describe("Monitor Check Worker", () => {
     expect(publishSpy).toHaveBeenCalledWith(
       "monitor.check.completed",
       expect.objectContaining({
-        userId: "507f1f77bcf86cd799439011",
+        workspaceId: "607f1f77bcf86cd799439022",
         payload: expect.objectContaining({
           monitorId: "mon-123",
           status: "success",
@@ -113,7 +114,45 @@ describe("Monitor Check Worker", () => {
       }),
     );
 
+    const completed = publishSpy.mock.calls.find(([type]) => type === "monitor.check.completed");
+    expect(completed?.[1]).not.toHaveProperty("userId");
+    for (const [, payload] of publishSpy.mock.calls) {
+      expect(payload).toMatchObject({ workspaceId: "607f1f77bcf86cd799439022" });
+    }
+
     expect(releaseSpy).toHaveBeenCalledWith("lock:monitor:mon-123", expect.any(String));
+  });
+
+  it("publishes failures and paused skips to the monitor's workspace", async () => {
+    vi.spyOn(redisService, "acquireLock").mockResolvedValue(true);
+    vi.spyOn(redisService, "releaseLock").mockResolvedValue(true);
+    const publishSpy = vi.spyOn(redisService, "publishDomainEvent").mockResolvedValue(undefined);
+
+    vi.spyOn(Monitor, "findById").mockResolvedValue({
+      _id: "mon-123",
+      userId: "507f1f77bcf86cd799439011",
+      workspaceId: "607f1f77bcf86cd799439022",
+      url: "https://example.com/api",
+      timeoutMs: 5000,
+      expectedStatusCodes: [200],
+      active: false,
+      configRevision: 1,
+    } as unknown as ReturnType<typeof Monitor.findById>);
+    (vi.spyOn(MonitorCheck, "findOneAndUpdate") as unknown as MockInstance).mockResolvedValue({
+      _id: "check-1",
+    });
+
+    await processMonitorCheckJob({
+      id: "job-2",
+      data: { monitorId: "mon-123", runId: "run-paused", manual: false },
+    } as unknown as Job<MonitorCheckJobData>);
+
+    const failed = publishSpy.mock.calls.find(([type]) => type === "monitor.check.failed");
+    expect(failed?.[1]).toMatchObject({
+      workspaceId: "607f1f77bcf86cd799439022",
+      payload: expect.objectContaining({ failureCategory: "MONITOR_PAUSED" }),
+    });
+    expect(failed?.[1]).not.toHaveProperty("userId");
   });
 
   it("safely handles configRevision mismatch when monitor was modified during probe", async () => {
@@ -124,6 +163,7 @@ describe("Monitor Check Worker", () => {
     vi.spyOn(Monitor, "findById").mockResolvedValue({
       _id: "mon-123",
       userId: "507f1f77bcf86cd799439011",
+      workspaceId: "607f1f77bcf86cd799439022",
       url: "https://example.com/api",
       timeoutMs: 5000,
       expectedStatusCodes: [200],

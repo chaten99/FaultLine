@@ -3,6 +3,7 @@ import { env } from "../../config/env.js";
 import { createApiError } from "../../lib/errors/create-api-error.js";
 import { Monitor } from "../monitors/monitor.model.js";
 import { ensureLifecycleBaselines } from "../monitors/monitor-lifecycle.service.js";
+import type { WorkspaceContext } from "../workspaces/workspace.types.js";
 import { buildMonitorSegments } from "./analytics-intervals.js";
 import { buildCsv, sanitizeEndpoint } from "./analytics-csv.js";
 import {
@@ -48,10 +49,10 @@ type MonitorFilters = {
 };
 
 const loadMonitors = async (
-  userId: string,
+  workspaceId: string,
   filters: MonitorFilters = {},
 ): Promise<MetricMonitor[]> => {
-  const filter: Record<string, unknown> = { userId: new Types.ObjectId(userId) };
+  const filter: Record<string, unknown> = { workspaceId: new Types.ObjectId(workspaceId) };
   if (filters.monitorId) filter._id = new Types.ObjectId(filters.monitorId);
   if (filters.monitorIds) {
     filter._id = { $in: filters.monitorIds.map((id) => new Types.ObjectId(id)) };
@@ -96,7 +97,7 @@ const windowMeta = (window: AnalyticsWindow, now: Date) => ({
 });
 
 const gatherInputs = async (
-  userId: string,
+  workspaceId: string,
   monitors: MetricMonitor[],
   window: AnalyticsWindow,
   now: Date,
@@ -121,16 +122,15 @@ const gatherInputs = async (
     ).active,
   }));
   const [stats, internalGaps, latency, checksInActive, incidents] = await Promise.all([
-    loadCheckStats(userId, ids, from, end),
+    loadCheckStats(ids, from, end),
     loadCheckGaps(
-      userId,
       monitors.map((monitor) => ({ id: monitor.id, intervalSeconds: monitor.intervalSeconds })),
       from,
       end,
     ),
-    loadLatencyByMonitor(userId, ids, from, end),
-    countChecksInSegments(userId, activeSegments),
-    loadIncidents(userId, ids, from, end),
+    loadLatencyByMonitor(ids, from, end),
+    countChecksInSegments(activeSegments),
+    loadIncidents(workspaceId, ids, from, end),
   ]);
   return {
     monitors,
@@ -159,13 +159,13 @@ const relativeChange = (current: number | null, previous: number | null): number
     ? null
     : Math.round(((current - previous) / previous) * 10_000) / 100;
 
-export const getOverview = async (userId: string, query: RangeQuery, now = new Date()) => {
+export const getOverview = async (ctx: WorkspaceContext, query: RangeQuery, now = new Date()) => {
   const window = toWindow(query, now);
-  await ensureLifecycleBaselines(userId, now);
-  const monitors = await loadMonitors(userId, { monitorId: query.monitorId });
-  const current = computeAll(await gatherInputs(userId, monitors, window, now));
+  await ensureLifecycleBaselines(ctx.workspaceId, now);
+  const monitors = await loadMonitors(ctx.workspaceId, { monitorId: query.monitorId });
+  const current = computeAll(await gatherInputs(ctx.workspaceId, monitors, window, now));
   const previousRange = previousWindow(window);
-  const previous = computeAll(await gatherInputs(userId, monitors, previousRange, now));
+  const previous = computeAll(await gatherInputs(ctx.workspaceId, monitors, previousRange, now));
   const both = current.summary.totalChecks > 0 && previous.summary.totalChecks > 0;
   const currentSummary = current.summary;
   const previousSummary = previous.summary;
@@ -205,7 +205,6 @@ export const getOverview = async (userId: string, query: RangeQuery, now = new D
 };
 
 const responseTimePayload = async (
-  userId: string,
   monitors: MetricMonitor[],
   window: AnalyticsWindow,
   now: Date,
@@ -213,7 +212,7 @@ const responseTimePayload = async (
   const ids = monitors.map((monitor) => monitor.id);
   const end = new Date(Math.min(window.to.getTime(), now.getTime()));
   const bucketMs = bucketSecondsFor(window.to.getTime() - window.from.getTime()) * 1000;
-  const byBucket = await loadLatencyByBucket(userId, ids, window.from, end, bucketMs);
+  const byBucket = await loadLatencyByBucket(ids, window.from, end, bucketMs);
   const series = [...byBucket.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([start, rows]) => {
@@ -238,26 +237,24 @@ const responseTimePayload = async (
   };
 };
 
-export const getResponseTimes = async (userId: string, query: RangeQuery, now = new Date()) => {
+export const getResponseTimes = async (
+  ctx: WorkspaceContext,
+  query: RangeQuery,
+  now = new Date(),
+) => {
   const window = toWindow(query, now);
-  const monitors = await loadMonitors(userId, { monitorId: query.monitorId });
+  const monitors = await loadMonitors(ctx.workspaceId, { monitorId: query.monitorId });
   return {
     window: windowMeta(window, now),
-    ...(await responseTimePayload(userId, monitors, window, now)),
+    ...(await responseTimePayload(monitors, window, now)),
   };
 };
 
-const availabilityPayload = async (
-  userId: string,
-  inputs: MetricInputs,
-  window: AnalyticsWindow,
-  now: Date,
-) => {
+const availabilityPayload = async (inputs: MetricInputs, window: AnalyticsWindow, now: Date) => {
   const { metrics, summary } = computeAll(inputs);
   const end = new Date(Math.min(window.to.getTime(), now.getTime()));
   const bucketMs = bucketSecondsFor(window.to.getTime() - window.from.getTime()) * 1000;
   const counts = await loadBucketCounts(
-    userId,
     inputs.monitors.map((monitor) => monitor.id),
     window.from,
     end,
@@ -278,12 +275,16 @@ const availabilityPayload = async (
   };
 };
 
-export const getAvailability = async (userId: string, query: RangeQuery, now = new Date()) => {
+export const getAvailability = async (
+  ctx: WorkspaceContext,
+  query: RangeQuery,
+  now = new Date(),
+) => {
   const window = toWindow(query, now);
-  await ensureLifecycleBaselines(userId, now);
-  const monitors = await loadMonitors(userId, { monitorId: query.monitorId });
-  const inputs = await gatherInputs(userId, monitors, window, now);
-  const payload = await availabilityPayload(userId, inputs, window, now);
+  await ensureLifecycleBaselines(ctx.workspaceId, now);
+  const monitors = await loadMonitors(ctx.workspaceId, { monitorId: query.monitorId });
+  const inputs = await gatherInputs(ctx.workspaceId, monitors, window, now);
+  const payload = await availabilityPayload(inputs, window, now);
   return {
     window: windowMeta(window, now),
     summary: {
@@ -297,15 +298,15 @@ export const getAvailability = async (userId: string, query: RangeQuery, now = n
 };
 
 export const getScopedAvailability = async (
-  userId: string,
+  workspaceId: string,
   monitorIds: string[],
   range: { range: RangePreset },
   now = new Date(),
 ) => {
   const window = toWindow(range, now);
-  const monitors = monitorIds.length > 0 ? await loadMonitors(userId, { monitorIds }) : [];
-  const inputs = await gatherInputs(userId, monitors, window, now);
-  const payload = await availabilityPayload(userId, inputs, window, now);
+  const monitors = monitorIds.length > 0 ? await loadMonitors(workspaceId, { monitorIds }) : [];
+  const inputs = await gatherInputs(workspaceId, monitors, window, now);
+  const payload = await availabilityPayload(inputs, window, now);
   return {
     window: windowMeta(window, now),
     availability: payload.summary.availability,
@@ -360,18 +361,18 @@ const sortValue = (
 };
 
 export const getMonitorTable = async (
-  userId: string,
+  ctx: WorkspaceContext,
   query: MonitorTableQuery,
   now = new Date(),
 ) => {
   const window = toWindow(query, now);
-  await ensureLifecycleBaselines(userId, now);
-  const monitors = await loadMonitors(userId, {
+  await ensureLifecycleBaselines(ctx.workspaceId, now);
+  const monitors = await loadMonitors(ctx.workspaceId, {
     monitorId: query.monitorId,
     status: query.status,
     search: query.search,
   });
-  const { metrics } = computeAll(await gatherInputs(userId, monitors, window, now));
+  const { metrics } = computeAll(await gatherInputs(ctx.workspaceId, monitors, window, now));
   const filtered = metrics.filter(
     (entry) => query.quality === "all" || entry.dataQuality === query.quality,
   );
@@ -421,11 +422,15 @@ export const getMonitorTable = async (
   };
 };
 
-export const getIncidentAnalytics = async (userId: string, query: RangeQuery, now = new Date()) => {
+export const getIncidentAnalytics = async (
+  ctx: WorkspaceContext,
+  query: RangeQuery,
+  now = new Date(),
+) => {
   const window = toWindow(query, now);
-  await ensureLifecycleBaselines(userId, now);
-  const monitors = await loadMonitors(userId, { monitorId: query.monitorId });
-  const inputs = await gatherInputs(userId, monitors, window, now);
+  await ensureLifecycleBaselines(ctx.workspaceId, now);
+  const monitors = await loadMonitors(ctx.workspaceId, { monitorId: query.monitorId });
+  const inputs = await gatherInputs(ctx.workspaceId, monitors, window, now);
   const { metrics } = computeAll(inputs);
   const bucketMs = bucketSecondsFor(window.to.getTime() - window.from.getTime()) * 1000;
   return {
@@ -443,18 +448,18 @@ export const getIncidentAnalytics = async (userId: string, query: RangeQuery, no
 };
 
 export const getMonitorAnalytics = async (
-  userId: string,
+  ctx: WorkspaceContext,
   monitorId: string,
   query: RangeQuery,
   now = new Date(),
 ) => {
   const window = toWindow(query, now);
-  await ensureLifecycleBaselines(userId, now);
-  const monitors = await loadMonitors(userId, { monitorId });
+  await ensureLifecycleBaselines(ctx.workspaceId, now);
+  const monitors = await loadMonitors(ctx.workspaceId, { monitorId });
   const monitor = monitors[0] as MetricMonitor;
-  const inputs = await gatherInputs(userId, monitors, window, now);
-  const availability = await availabilityPayload(userId, inputs, window, now);
-  const responseTimes = await responseTimePayload(userId, monitors, window, now);
+  const inputs = await gatherInputs(ctx.workspaceId, monitors, window, now);
+  const availability = await availabilityPayload(inputs, window, now);
+  const responseTimes = await responseTimePayload(monitors, window, now);
   const entry = availability.metrics[0] as MonitorMetrics;
   const bucketMs = bucketSecondsFor(window.to.getTime() - window.from.getTime()) * 1000;
   const incidentView = computeIncidentAnalytics(
@@ -504,15 +509,15 @@ const formatMs = (value: number | null): number | null =>
   value === null ? null : Math.round(value);
 
 export const buildExport = async (
-  userId: string,
+  ctx: WorkspaceContext,
   type: ExportType,
   query: RangeQuery,
   now = new Date(),
 ): Promise<{ filename: string; csv: string }> => {
   const window = toWindow(query, now);
-  await ensureLifecycleBaselines(userId, now);
-  const monitors = await loadMonitors(userId, { monitorId: query.monitorId });
-  const inputs = await gatherInputs(userId, monitors, window, now);
+  await ensureLifecycleBaselines(ctx.workspaceId, now);
+  const monitors = await loadMonitors(ctx.workspaceId, { monitorId: query.monitorId });
+  const inputs = await gatherInputs(ctx.workspaceId, monitors, window, now);
   const { metrics, summary } = computeAll(inputs);
   const generatedAt = now;
   const stamp = `${window.from.toISOString().slice(0, 10)}_${window.to.toISOString().slice(0, 10)}`;
@@ -623,7 +628,7 @@ export const buildExport = async (
   const end = Math.min(window.to.getTime(), now.getTime());
   const incidents = (
     await loadIncidents(
-      userId,
+      ctx.workspaceId,
       monitors.map((monitor) => monitor.id),
       window.from,
       new Date(end),

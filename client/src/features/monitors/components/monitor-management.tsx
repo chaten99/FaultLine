@@ -27,12 +27,15 @@ import { MonitorSummaryCards } from "./monitor-summary-cards";
 import { MonitorList } from "./monitor-list";
 import { MonitorListSkeleton } from "./monitor-list-skeleton";
 import { MonitorEmptyState } from "./monitor-empty-state";
+import { ReadOnlyBadge } from "@/features/workspaces/components/read-only-badge";
+import { useCan } from "@/features/workspaces/hooks/use-workspaces";
 import { AddMonitorDialog } from "./add-monitor-dialog";
 import { EditMonitorDialog } from "./edit-monitor-dialog";
 import { DeleteMonitorDialog } from "./delete-monitor-dialog";
 import type { Monitor } from "../api/monitors.api";
 
 export function MonitorManagement() {
+  const canWrite = useCan("monitors:write");
   const {
     monitors,
     page,
@@ -102,10 +105,14 @@ export function MonitorManagement() {
           </p>
         </div>
 
-        <Button onClick={() => setAddOpen(true)} className="gap-2 shrink-0">
-          <Plus className="size-4" />
-          Add monitor
-        </Button>
+        {canWrite ? (
+          <Button onClick={() => setAddOpen(true)} className="gap-2 shrink-0">
+            <Plus className="size-4" />
+            Add monitor
+          </Button>
+        ) : (
+          <ReadOnlyBadge reason="Viewers can see monitors but can't change them." />
+        )}
       </div>
 
       <MonitorSummaryCards counts={counts} isLoading={isLoading} />
@@ -235,7 +242,10 @@ export function MonitorManagement() {
         {isLoading ? (
           <MonitorListSkeleton />
         ) : counts.total === 0 && !hasActiveFilters ? (
-          <MonitorEmptyState type="empty" onAddClick={() => setAddOpen(true)} />
+          <MonitorEmptyState
+            type="empty"
+            onAddClick={canWrite ? () => setAddOpen(true) : undefined}
+          />
         ) : monitors.length === 0 && hasActiveFilters ? (
           <MonitorEmptyState
             type="search-empty"

@@ -6,6 +6,7 @@ export type IncidentResolutionType = "automatic" | "manual";
 export interface IIncident extends Document {
   monitorId: Types.ObjectId;
   userId: Types.ObjectId;
+  workspaceId: Types.ObjectId;
   title: string;
   status: IncidentStatus;
   firstFailureAt: Date;
@@ -30,6 +31,7 @@ const incidentSchema = new Schema(
   {
     monitorId: { type: Schema.Types.ObjectId, ref: "Monitor", required: true },
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    workspaceId: { type: Schema.Types.ObjectId, ref: "Workspace", required: true },
     title: { type: String, required: true, trim: true, maxlength: 200 },
     status: {
       type: String,
@@ -55,6 +57,7 @@ const incidentSchema = new Schema(
   { timestamps: true },
 );
 
+incidentSchema.index({ workspaceId: 1, createdAt: -1 });
 incidentSchema.index({ userId: 1, createdAt: -1 });
 incidentSchema.index({ monitorId: 1, createdAt: -1 });
 incidentSchema.index({ status: 1, createdAt: -1 });

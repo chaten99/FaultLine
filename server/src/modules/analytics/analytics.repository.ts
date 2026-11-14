@@ -16,8 +16,7 @@ export type MonitorScope = {
 
 const toObjectIds = (ids: string[]) => ids.map((id) => new Types.ObjectId(id));
 
-const eligibleMatch = (userId: string, ids: string[], from: Date, to: Date) => ({
-  userId: new Types.ObjectId(userId),
+const eligibleMatch = (ids: string[], from: Date, to: Date) => ({
   monitorId: { $in: toObjectIds(ids) },
   completedAt: { $gte: from, $lt: to },
   $or: [
@@ -26,8 +25,8 @@ const eligibleMatch = (userId: string, ids: string[], from: Date, to: Date) => (
   ],
 });
 
-const latencyMatch = (userId: string, ids: string[], from: Date, to: Date) => ({
-  ...eligibleMatch(userId, ids, from, to),
+const latencyMatch = (ids: string[], from: Date, to: Date) => ({
+  ...eligibleMatch(ids, from, to),
   status: { $in: ["success", "failure"] },
   statusCode: { $type: "number" },
   responseDurationMs: { $gte: 0 },
@@ -59,7 +58,6 @@ export type MonitorCheckStats = {
 };
 
 export const loadCheckStats = async (
-  userId: string,
   ids: string[],
   from: Date,
   to: Date,
@@ -72,7 +70,7 @@ export const loadCheckStats = async (
     firstCheckAt: Date;
     lastCheckAt: Date;
   }>([
-    { $match: eligibleMatch(userId, ids, from, to) },
+    { $match: eligibleMatch(ids, from, to) },
     {
       $group: {
         _id: "$monitorId",
@@ -93,7 +91,6 @@ export const loadCheckStats = async (
 };
 
 export const loadBucketCounts = async (
-  userId: string,
   ids: string[],
   from: Date,
   to: Date,
@@ -105,7 +102,7 @@ export const loadBucketCounts = async (
     total: number;
     failed: number;
   }>([
-    { $match: eligibleMatch(userId, ids, from, to) },
+    { $match: eligibleMatch(ids, from, to) },
     {
       $group: {
         _id: bucketExpression(bucketMs),
@@ -118,7 +115,6 @@ export const loadBucketCounts = async (
 };
 
 export const countChecksInSegments = async (
-  userId: string,
   segments: Array<{ monitorId: string; intervals: Interval[] }>,
 ): Promise<Map<string, number>> => {
   const clauses = segments.flatMap(({ monitorId, intervals }) =>
@@ -131,7 +127,6 @@ export const countChecksInSegments = async (
   const rows = await MonitorCheck.aggregate<{ _id: Types.ObjectId; total: number }>([
     {
       $match: {
-        userId: new Types.ObjectId(userId),
         $and: [
           { $or: clauses },
           {
@@ -178,7 +173,6 @@ const toRow = (row: RawHistogramRow): HistogramRow => ({
 });
 
 export const loadLatencyByBucket = async (
-  userId: string,
   ids: string[],
   from: Date,
   to: Date,
@@ -187,7 +181,7 @@ export const loadLatencyByBucket = async (
   if (ids.length === 0) return new Map();
   const rows = await MonitorCheck.aggregate<RawHistogramRow>(
     [
-      { $match: latencyMatch(userId, ids, from, to) },
+      { $match: latencyMatch(ids, from, to) },
       groupStage({ bucket: bucketExpression(bucketMs) }),
       { $limit: maxHistogramRows },
     ],
@@ -204,7 +198,6 @@ export const loadLatencyByBucket = async (
 };
 
 export const loadLatencyByMonitor = async (
-  userId: string,
   ids: string[],
   from: Date,
   to: Date,
@@ -212,7 +205,7 @@ export const loadLatencyByMonitor = async (
   if (ids.length === 0) return new Map();
   const rows = await MonitorCheck.aggregate<RawHistogramRow>(
     [
-      { $match: latencyMatch(userId, ids, from, to) },
+      { $match: latencyMatch(ids, from, to) },
       groupStage({ monitorId: "$monitorId" }),
       { $limit: maxHistogramRows },
     ],
@@ -229,7 +222,6 @@ export const loadLatencyByMonitor = async (
 };
 
 export const loadCheckGaps = async (
-  userId: string,
   monitors: MonitorScope[],
   from: Date,
   to: Date,
@@ -253,7 +245,6 @@ export const loadCheckGaps = async (
     [
       {
         $match: eligibleMatch(
-          userId,
           monitors.map((monitor) => monitor.id),
           from,
           to,
@@ -334,7 +325,7 @@ export type IncidentRecord = {
 };
 
 export const loadIncidents = async (
-  userId: string,
+  workspaceId: string,
   ids: string[],
   from: Date,
   to: Date,
@@ -342,7 +333,7 @@ export const loadIncidents = async (
 ): Promise<IncidentRecord[]> => {
   if (ids.length === 0) return [];
   const rows = await Incident.find({
-    userId: new Types.ObjectId(userId),
+    workspaceId: new Types.ObjectId(workspaceId),
     monitorId: { $in: toObjectIds(ids) },
     firstFailureAt: { $lt: to },
     $or: [{ resolvedAt: { $gte: from } }, { resolvedAt: { $exists: false } }, { resolvedAt: null }],

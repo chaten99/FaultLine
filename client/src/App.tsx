@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { PageLoader } from "@/components/common/page-loader";
@@ -24,6 +24,13 @@ import { PublicConfirmPage } from "@/features/status-pages/pages/public-confirm-
 import { PublicUnsubscribePage } from "@/features/status-pages/pages/public-unsubscribe-page";
 import { NotificationsPage } from "@/features/notifications/pages/notifications-page";
 import { ProfilePage } from "@/features/profile/pages/profile-page";
+import { WorkspaceGate } from "@/features/workspaces/components/workspace-gate";
+import { useWorkspaceSocket } from "@/features/workspaces/realtime/use-workspace-socket";
+import { useWorkspaceStore } from "@/features/workspaces/store/workspace.store";
+import { AcceptInvitationPage } from "@/features/workspaces/pages/accept-invitation-page";
+import { AuditLogPage } from "@/features/workspaces/pages/audit-log-page";
+import { MembersPage } from "@/features/workspaces/pages/members-page";
+import { WorkspaceSettingsPage } from "@/features/workspaces/pages/workspace-settings-page";
 
 export default function App() {
   const [queryClient] = useState(
@@ -43,6 +50,7 @@ export default function App() {
   const status = useAuthStore((state) => state.status);
   const setSession = useAuthStore((state) => state.setSession);
   const clearSession = useAuthStore((state) => state.clearSession);
+  const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
 
   useEffect(() => {
     void refresh()
@@ -55,7 +63,10 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider delayDuration={350}>
-        <Routes>
+        <SessionCacheReset />
+        {status === "authenticated" && <WorkspaceRealtime />}
+        <Routes key={activeWorkspaceId ?? "pending"}>
+          <Route path="/invitations/accept" element={<AcceptInvitationPage />} />
           <Route path="/status/:slug" element={<PublicStatusPage />} />
           <Route path="/status/:slug/confirm" element={<PublicConfirmPage />} />
           <Route path="/status/:slug/unsubscribe" element={<PublicUnsubscribePage />} />
@@ -136,6 +147,30 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <NotificationsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings/workspace"
+            element={
+              <ProtectedRoute>
+                <WorkspaceSettingsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings/members"
+            element={
+              <ProtectedRoute>
+                <MembersPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings/audit-log"
+            element={
+              <ProtectedRoute>
+                <AuditLogPage />
               </ProtectedRoute>
             }
           />
@@ -222,5 +257,19 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     if (status === "unauthenticated")
       navigate("/login", { replace: true, state: { from: location.pathname } });
   }, [location.pathname, navigate, status]);
-  return status === "authenticated" ? children : null;
+  return status === "authenticated" ? <WorkspaceGate>{children}</WorkspaceGate> : null;
+}
+
+function WorkspaceRealtime() {
+  useWorkspaceSocket();
+  return null;
+}
+
+function SessionCacheReset() {
+  const queryClient = useQueryClient();
+  const status = useAuthStore((state) => state.status);
+  useEffect(() => {
+    if (status === "unauthenticated") queryClient.clear();
+  }, [queryClient, status]);
+  return null;
 }

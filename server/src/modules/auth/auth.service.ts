@@ -11,6 +11,7 @@ import type { AuthResult, SafeUser } from "./auth.types.js";
 import { createApiError } from "../../lib/errors/create-api-error.js";
 import { startLoginVerification } from "./otp.service.js";
 import { revokeOtherSessions } from "./session.service.js";
+import { ensurePersonalWorkspace } from "../workspaces/workspace-core.service.js";
 
 const toSafeUser = (user: { _id: unknown; name: string; email: string }): SafeUser => ({
   id: String(user._id),
@@ -61,6 +62,7 @@ export const registerUser = async (input: {
     }
     throw error;
   }
+  await ensurePersonalWorkspace(String(user._id));
   return { userId: String(user._id), email };
 };
 

@@ -40,6 +40,8 @@ const environmentSchema = z.object({
     .string()
     .min(32)
     .default("development-status-page-token-secret-change-me-123456"),
+  WORKSPACE_INVITATION_TTL_DAYS: z.coerce.number().int().min(1).max(30).default(7),
+  WORKSPACE_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
   NOTIFICATION_ENCRYPTION_KEY: z.preprocess(
     (value) => (value === "" ? undefined : value),
     z

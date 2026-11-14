@@ -4,7 +4,13 @@ import { Monitor } from "./monitor.model.js";
 import { publishPublicStatusForMonitor } from "../status-pages/status-page-realtime.service.js";
 import { MonitorLifecycleEvent, type LifecycleEventType } from "./monitor-lifecycle.model.js";
 
-type MonitorRef = { _id: unknown; userId: unknown; active: boolean; createdAt?: Date };
+type MonitorRef = {
+  _id: unknown;
+  userId: unknown;
+  workspaceId?: unknown;
+  active: boolean;
+  createdAt?: Date;
+};
 
 export const recordMonitorCreated = async (monitor: MonitorRef): Promise<void> => {
   try {
@@ -44,7 +50,7 @@ export const recordMonitorActiveChange = async (
       active: monitor.active,
       at,
     });
-    void publishPublicStatusForMonitor(String(monitor.userId), String(monitor._id));
+    void publishPublicStatusForMonitor(String(monitor.workspaceId), String(monitor._id));
   } catch (error) {
     logger.warn(
       { err: error, monitorId: String(monitor._id) },
@@ -62,10 +68,12 @@ export const deleteMonitorLifecycle = async (monitorId: string): Promise<void> =
 };
 
 export const ensureLifecycleBaselines = async (
-  userId?: string,
+  workspaceId?: string,
   now = new Date(),
 ): Promise<number> => {
-  const filter: Record<string, unknown> = userId ? { userId: new Types.ObjectId(userId) } : {};
+  const filter: Record<string, unknown> = workspaceId
+    ? { workspaceId: new Types.ObjectId(workspaceId) }
+    : {};
   const monitors = await Monitor.find(filter).select("_id userId active").lean();
   if (monitors.length === 0) return 0;
   const tracked = await MonitorLifecycleEvent.find({

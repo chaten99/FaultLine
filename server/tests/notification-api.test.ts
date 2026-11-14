@@ -11,6 +11,12 @@ import { decryptSecret } from "../src/modules/notifications/notification-crypto.
 import { verifyWebhookSignature } from "../src/modules/notifications/channels/webhook.channel.js";
 import { sendDelivery } from "../src/modules/notifications/notification-sender.service.js";
 import { bindMemoryModel } from "./helpers/memory-model.js";
+import {
+  bindWorkspaceModels,
+  resetWorkspaceModels,
+  seedWorkspace,
+  workspaceHeaders,
+} from "./helpers/workspace-fixtures.js";
 import type { ChannelResult } from "../src/modules/notifications/notification.types.js";
 
 const queueAdd = vi.hoisted(() => vi.fn());
@@ -43,9 +49,11 @@ vi.mock("../src/modules/notifications/notification-sender.service.js", () => ({
 const redis = await import("../src/lib/redis/redis.service.js");
 const sendMock = vi.mocked(sendDelivery);
 
+const workspaceStores = bindWorkspaceModels();
+
 const stores = {
   users: bindMemoryModel(User),
-  prefs: bindMemoryModel(NotificationPreferences, { uniqueKeys: ["userId"] }),
+  prefs: bindMemoryModel(NotificationPreferences),
   integrations: bindMemoryModel(NotificationIntegration),
   deliveries: bindMemoryModel(NotificationDelivery, { uniqueKeys: ["deliveryKey"] }),
 };
@@ -54,7 +62,23 @@ const userA = new Types.ObjectId();
 const userB = new Types.ObjectId();
 const tokenA = createAccessToken(String(userA));
 const tokenB = createAccessToken(String(userB));
-const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+const adminId = new Types.ObjectId();
+const memberId = new Types.ObjectId();
+const viewerId = new Types.ObjectId();
+const tokenAdmin = createAccessToken(String(adminId));
+const tokenMember = createAccessToken(String(memberId));
+const tokenViewer = createAccessToken(String(viewerId));
+const w1 = new Types.ObjectId();
+const w2 = new Types.ObjectId();
+const workspaceByToken = new Map<string, Types.ObjectId>([
+  [tokenA, w1],
+  [tokenAdmin, w1],
+  [tokenMember, w1],
+  [tokenViewer, w1],
+  [tokenB, w2],
+]);
+const auth = (token: string) =>
+  workspaceHeaders(token, workspaceByToken.get(token) as Types.ObjectId);
 
 const slackUrl = "https://hooks.slack.com/services/T0AAAA111/B0BBBB222/SuperSecretToken9876";
 const webhookUrl = "https://hooks.example.com/faultline/private-path-token";
@@ -63,6 +87,17 @@ const ok: ChannelResult = { ok: true, responseCode: 200, durationMs: 40 };
 
 beforeEach(() => {
   Object.values(stores).forEach((store) => store.reset());
+  resetWorkspaceModels(workspaceStores);
+  seedWorkspace(workspaceStores, {
+    id: w1,
+    ownerId: userA,
+    members: [
+      { userId: adminId, role: "admin" },
+      { userId: memberId, role: "member" },
+      { userId: viewerId, role: "viewer" },
+    ],
+  });
+  seedWorkspace(workspaceStores, { id: w2, ownerId: userB });
   queueAdd.mockReset();
   queueAdd.mockResolvedValue({ id: "job" });
   sendMock.mockReset();
@@ -576,6 +611,7 @@ describe("delivery history", () => {
       kind: "incident",
       eventId: "incident.opened:1",
       eventType: "incident.opened",
+      workspaceId: w1,
       userId: userA,
       channel: "email",
       status: "delivered",
@@ -605,7 +641,7 @@ describe("delivery history", () => {
       seed({ createdAt: new Date(Date.now() - index * 1000) });
     }
     seed({ status: "failed", channel: "slack", eventType: "incident.resolved" });
-    seed({ userId: userB });
+    seed({ workspaceId: w2, userId: userB });
 
     const first = await request(app)
       .get("/api/notifications/deliveries?pageSize=5")
@@ -659,7 +695,7 @@ describe("delivery history", () => {
   });
 
   it("hides other users' deliveries", async () => {
-    const id = seed({ userId: userB });
+    const id = seed({ workspaceId: w2, userId: userB });
     await request(app).get(`/api/notifications/deliveries/${id}`).set(auth(tokenA)).expect(404);
     await request(app)
       .post(`/api/notifications/deliveries/${id}/retry`)
@@ -682,5 +718,228 @@ describe("delivery history", () => {
       .set(auth(tokenA))
       .expect(409);
     expect(conflict.body.code).toBe("DELIVERY_NOT_RETRYABLE");
+  });
+});
+
+describe("workspace roles and isolation", () => {
+  const createAs = (token: string) =>
+    request(app)
+      .post("/api/notifications/integrations/slack")
+      .set(auth(token))
+      .send({ name: "Ops", webhookUrl: slackUrl });
+
+  const seedDelivery = (overrides: Record<string, unknown> = {}) => {
+    const id = new Types.ObjectId();
+    stores.deliveries.docs.push({
+      _id: id,
+      deliveryKey: `role-${String(id)}`,
+      kind: "incident",
+      eventId: "incident.opened:1",
+      eventType: "incident.opened",
+      workspaceId: w1,
+      userId: userA,
+      channel: "email",
+      status: "failed",
+      attempts: 5,
+      generation: 0,
+      attemptHistory: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...overrides,
+    });
+    return String(id);
+  };
+
+  it("lets owners and admins manage integrations and deliveries", async () => {
+    for (const token of [tokenA, tokenAdmin]) {
+      const created = await createAs(token);
+      expect(created.status).toBe(201);
+      await request(app).get("/api/notifications/integrations").set(auth(token)).expect(200);
+      await request(app).get("/api/notifications/deliveries").set(auth(token)).expect(200);
+    }
+    expect(stores.integrations.docs).toHaveLength(2);
+    expect(stores.integrations.docs.every((doc) => String(doc.workspaceId) === String(w1))).toBe(
+      true,
+    );
+  });
+
+  it("forbids members and viewers from every integration and delivery operation", async () => {
+    const created = await createAs(tokenA).expect(201);
+    const integrationId = created.body.integration.id as string;
+    const deliveryId = seedDelivery();
+    for (const token of [tokenMember, tokenViewer]) {
+      const attempts = [
+        request(app).get("/api/notifications/integrations").set(auth(token)),
+        createAs(token),
+        request(app)
+          .patch(`/api/notifications/integrations/${integrationId}`)
+          .set(auth(token))
+          .send({ name: "Hijack" }),
+        request(app).delete(`/api/notifications/integrations/${integrationId}`).set(auth(token)),
+        request(app)
+          .post(`/api/notifications/integrations/${integrationId}/rotate-secret`)
+          .set(auth(token)),
+        request(app).post(`/api/notifications/integrations/${integrationId}/test`).set(auth(token)),
+        request(app).get("/api/notifications/deliveries").set(auth(token)),
+        request(app).get(`/api/notifications/deliveries/${deliveryId}`).set(auth(token)),
+        request(app).post(`/api/notifications/deliveries/${deliveryId}/retry`).set(auth(token)),
+      ];
+      for (const attempt of attempts) {
+        const response = await attempt;
+        expect(response.status).toBe(403);
+        expect(response.body.code).toBe("INSUFFICIENT_PERMISSIONS");
+      }
+    }
+    expect(stores.integrations.docs).toHaveLength(1);
+    expect(stores.integrations.docs[0]?.name).toBe("Ops");
+    expect(queueAdd).not.toHaveBeenCalled();
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it("lets every role manage their own preferences and send themselves a test email", async () => {
+    for (const [userId, token] of [
+      [adminId, tokenAdmin],
+      [memberId, tokenMember],
+      [viewerId, tokenViewer],
+    ] as const) {
+      stores.users.docs.push({
+        _id: userId,
+        name: "Teammate",
+        email: `${String(userId)}@example.com`,
+        emailVerifiedAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      const patched = await request(app)
+        .patch("/api/notifications/preferences")
+        .set(auth(token))
+        .send({ events: { acknowledged: true } })
+        .expect(200);
+      expect(patched.body.events.acknowledged).toBe(true);
+      expect(patched.body.email.address).toBe(`${String(userId)}@example.com`);
+    }
+    sendMock.mockResolvedValue(ok);
+    await request(app).post("/api/notifications/email/test").set(auth(tokenViewer)).expect(200);
+    expect(String(sendMock.mock.calls[0]?.[0].userId)).toBe(String(viewerId));
+    const owner = await request(app)
+      .get("/api/notifications/preferences")
+      .set(auth(tokenA))
+      .expect(200);
+    expect(owner.body.events.acknowledged).toBe(false);
+  });
+
+  it("stores preferences per workspace for the same user", async () => {
+    workspaceStores.members.docs.push({
+      _id: new Types.ObjectId(),
+      workspaceId: w2,
+      userId: userA,
+      role: "member",
+      status: "active",
+      joinedAt: new Date(),
+    });
+    await request(app)
+      .patch("/api/notifications/preferences")
+      .set(auth(tokenA))
+      .send({ enabled: false })
+      .expect(200);
+    const other = await request(app)
+      .get("/api/notifications/preferences")
+      .set({ Authorization: `Bearer ${tokenA}`, "X-Workspace-Id": String(w2) })
+      .expect(200);
+    expect(other.body.enabled).toBe(true);
+    const here = await request(app)
+      .get("/api/notifications/preferences")
+      .set(auth(tokenA))
+      .expect(200);
+    expect(here.body.enabled).toBe(false);
+    expect(stores.prefs.docs).toHaveLength(1);
+    expect(String(stores.prefs.docs[0]?.workspaceId)).toBe(String(w1));
+  });
+
+  it("rejects workspaces the caller does not belong to, and removed members", async () => {
+    await createAs(tokenA).expect(201);
+    const foreign = { Authorization: `Bearer ${tokenB}`, "X-Workspace-Id": String(w1) };
+    for (const path of [
+      "/api/notifications/integrations",
+      "/api/notifications/deliveries",
+      "/api/notifications/preferences",
+    ]) {
+      const response = await request(app).get(path).set(foreign);
+      expect(response.status).toBe(404);
+      expect(response.body.code).toBe("WORKSPACE_NOT_FOUND");
+    }
+    await request(app)
+      .post("/api/notifications/integrations/slack")
+      .set(foreign)
+      .send({ name: "x", webhookUrl: slackUrl })
+      .expect(404);
+
+    const member = workspaceStores.members.docs.find(
+      (doc) => String(doc.userId) === String(adminId),
+    );
+    (member as Record<string, unknown>).status = "removed";
+    const removed = await request(app).get("/api/notifications/integrations").set(auth(tokenAdmin));
+    expect(removed.status).toBe(404);
+    expect(removed.body.code).toBe("WORKSPACE_NOT_FOUND");
+  });
+
+  it("keeps integrations and deliveries invisible across workspaces", async () => {
+    const created = await createAs(tokenA).expect(201);
+    const integrationId = created.body.integration.id as string;
+    const mine = seedDelivery();
+    const theirs = seedDelivery({ workspaceId: w2, userId: userB });
+    const list = await request(app)
+      .get("/api/notifications/integrations")
+      .set(auth(tokenB))
+      .expect(200);
+    expect(list.body.items).toHaveLength(0);
+    const own = await request(app)
+      .get("/api/notifications/deliveries")
+      .set(auth(tokenA))
+      .expect(200);
+    expect(own.body.items.map((item: { id: string }) => item.id)).toEqual([mine]);
+    await request(app).get(`/api/notifications/deliveries/${theirs}`).set(auth(tokenA)).expect(404);
+    await request(app)
+      .post(`/api/notifications/deliveries/${theirs}/retry`)
+      .set(auth(tokenA))
+      .expect(404);
+    await request(app)
+      .delete(`/api/notifications/integrations/${integrationId}`)
+      .set(auth(tokenB))
+      .expect(404);
+    await request(app)
+      .post(`/api/notifications/integrations/${integrationId}/test`)
+      .set(auth(tokenB))
+      .expect(404);
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(stores.integrations.docs).toHaveLength(1);
+  });
+
+  it("scopes the integration limit and test deliveries to the workspace", async () => {
+    for (let index = 0; index < 10; index += 1) {
+      await createAs(tokenA).expect(201);
+    }
+    await createAs(tokenA).expect(409);
+    await createAs(tokenB).expect(201);
+    const integrationId = stores.integrations.docs.find(
+      (doc) => String(doc.workspaceId) === String(w2),
+    )?._id;
+    sendMock.mockResolvedValue(ok);
+    const result = await request(app)
+      .post(`/api/notifications/integrations/${String(integrationId)}/test`)
+      .set(auth(tokenB))
+      .expect(200);
+    expect(result.body.delivery.status).toBe("delivered");
+    expect(String(stores.deliveries.docs[0]?.workspaceId)).toBe(String(w2));
+  });
+
+  it("retries a failed delivery only inside its own workspace for permitted roles", async () => {
+    const deliveryId = seedDelivery();
+    const response = await request(app)
+      .post(`/api/notifications/deliveries/${deliveryId}/retry`)
+      .set(auth(tokenAdmin))
+      .expect(200);
+    expect(response.body.delivery).toMatchObject({ id: deliveryId, attempts: 0 });
+    expect(queueAdd).toHaveBeenCalledTimes(1);
   });
 });

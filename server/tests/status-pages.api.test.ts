@@ -12,6 +12,12 @@ import { StatusPageSubscriber } from "../src/modules/status-pages/status-page-su
 import { PublicStatusPage } from "../src/modules/status-pages/status-page.model.js";
 import { invalidateStatusCache } from "../src/modules/status-pages/status-page-snapshot.service.js";
 import { bindMemoryModel } from "./helpers/memory-model.js";
+import {
+  bindWorkspaceModels,
+  resetWorkspaceModels,
+  seedWorkspace,
+  workspaceHeaders,
+} from "./helpers/workspace-fixtures.js";
 
 const redisState = vi.hoisted(() => {
   const counts = new Map<string, number>();
@@ -79,12 +85,19 @@ const pages = bindMemoryModel(PublicStatusPage, { uniqueKeys: ["slug"] });
 const services = bindMemoryModel(StatusPageService);
 const subscribers = bindMemoryModel(StatusPageSubscriber);
 const deliveries = bindMemoryModel(StatusPageDelivery);
+const workspaceStores = bindWorkspaceModels();
 
 const userA = new Types.ObjectId();
 const userB = new Types.ObjectId();
+const userViewer = new Types.ObjectId();
+const userMember = new Types.ObjectId();
+const wsA = new Types.ObjectId();
+const wsB = new Types.ObjectId();
 const tokenA = createAccessToken(String(userA));
 const tokenB = createAccessToken(String(userB));
-const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+const tokenViewer = createAccessToken(String(userViewer));
+const tokenMember = createAccessToken(String(userMember));
+const auth = (token: string) => workspaceHeaders(token, token === tokenB ? wsB : wsA);
 
 const ids = {
   api: new Types.ObjectId(),
@@ -95,6 +108,7 @@ const ids = {
 const addMonitor = (id: Types.ObjectId, owner: Types.ObjectId, name: string, extra = {}) =>
   monitors.docs.push({
     _id: id,
+    workspaceId: owner === userB ? wsB : wsA,
     userId: owner,
     name,
     url: `https://${name.toLowerCase()}.acme.test/health?token=SECRET_${name}`,
@@ -122,6 +136,7 @@ const addIncident = (monitorId: Types.ObjectId, overrides: Record<string, unknow
   const _id = new Types.ObjectId();
   incidents.docs.push({
     _id,
+    workspaceId: wsA,
     userId: userA,
     monitorId,
     title: "Incident on Internal Checkout: UNEXPECTED_STATUS",
@@ -158,6 +173,16 @@ beforeEach(() => {
   [monitors, checks, incidents, pages, services, subscribers, deliveries].forEach((store) =>
     store.reset(),
   );
+  resetWorkspaceModels(workspaceStores);
+  seedWorkspace(workspaceStores, {
+    ownerId: userA,
+    id: wsA,
+    members: [
+      { userId: userViewer, role: "viewer" },
+      { userId: userMember, role: "member" },
+    ],
+  });
+  seedWorkspace(workspaceStores, { ownerId: userB, id: wsB });
   redisState.counts.clear();
   redisState.published.length = 0;
   invalidateStatusCache();
@@ -201,6 +226,7 @@ describe("status page management", () => {
       publishedAt: null,
     });
     expect(response.body.page).not.toHaveProperty("ownerId");
+    expect(response.body.page).not.toHaveProperty("workspaceId");
   });
 
   it("validates names, slugs, markup and logo URLs", async () => {
@@ -794,5 +820,180 @@ describe("owner views of subscribers and analytics", () => {
       subscribers: { pending: 1, active: 1, unsubscribed: 1 },
       uptime: { rangeDays: 30, availability: { percent: 99.5 } },
     });
+  });
+});
+
+describe("workspace roles and isolation", () => {
+  const as = (token: string, workspace: Types.ObjectId = wsA) => workspaceHeaders(token, workspace);
+
+  it("lets viewers read pages but never change anything", async () => {
+    const pageId = await publishedPage();
+    const reads = [
+      request(app).get("/api/status-pages").set(as(tokenViewer)),
+      request(app).get(`/api/status-pages/${pageId}`).set(as(tokenViewer)),
+      request(app).get(`/api/status-pages/${pageId}/services`).set(as(tokenViewer)),
+      request(app).post(`/api/status-pages/${pageId}/preview`).set(as(tokenViewer)),
+      request(app).get("/api/status-pages/monitor-options").set(as(tokenViewer)),
+      request(app).get("/api/status-pages/slug-available?slug=free-slug").set(as(tokenViewer)),
+      request(app).get(`/api/status-pages/${pageId}/analytics`).set(as(tokenViewer)),
+    ];
+    for (const read of reads) expect((await read).status).toBe(200);
+
+    const serviceId = (
+      await request(app).get(`/api/status-pages/${pageId}/services`).set(as(tokenA))
+    ).body.items[0].id as string;
+    const writes = [
+      request(app)
+        .post("/api/status-pages")
+        .set(as(tokenViewer))
+        .send({ name: "X page", slug: "viewer-page" }),
+      request(app)
+        .patch(`/api/status-pages/${pageId}`)
+        .set(as(tokenViewer))
+        .send({ name: "Hacked" }),
+      request(app).delete(`/api/status-pages/${pageId}`).set(as(tokenViewer)),
+      request(app).post(`/api/status-pages/${pageId}/publish`).set(as(tokenViewer)),
+      request(app).post(`/api/status-pages/${pageId}/unpublish`).set(as(tokenViewer)),
+      request(app)
+        .post(`/api/status-pages/${pageId}/services`)
+        .set(as(tokenViewer))
+        .send({ name: "S", monitorIds: [] }),
+      request(app)
+        .patch(`/api/status-pages/${pageId}/services/${serviceId}`)
+        .set(as(tokenViewer))
+        .send({ name: "H" }),
+      request(app).delete(`/api/status-pages/${pageId}/services/${serviceId}`).set(as(tokenViewer)),
+      request(app)
+        .post(`/api/status-pages/${pageId}/services/reorder`)
+        .set(as(tokenViewer))
+        .send({ serviceIds: [serviceId] }),
+      request(app).get(`/api/status-pages/${pageId}/subscribers`).set(as(tokenViewer)),
+    ];
+    for (const write of writes) {
+      const response = await write;
+      expect(response.status).toBe(403);
+      expect(response.body.code).toBe("INSUFFICIENT_PERMISSIONS");
+    }
+    expect(pages.docs).toHaveLength(1);
+    expect(pages.docs[0]?.name).toBe("Acme Status");
+    expect(pages.docs[0]?.status).toBe("published");
+    expect(services.docs).toHaveLength(1);
+  });
+
+  it("lets members manage pages created by any teammate", async () => {
+    const created = await request(app)
+      .post("/api/status-pages")
+      .set(as(tokenMember))
+      .send({ name: "Team Page", slug: "team-page" })
+      .expect(201);
+    const pageId = created.body.page.id as string;
+    expect(String(pages.docs[0]?.workspaceId)).toBe(String(wsA));
+    expect(String(pages.docs[0]?.ownerId)).toBe(String(userMember));
+
+    const shared = await request(app).get("/api/status-pages").set(as(tokenA)).expect(200);
+    expect(shared.body.items.map((item: { slug: string }) => item.slug)).toEqual(["team-page"]);
+
+    await request(app)
+      .post(`/api/status-pages/${pageId}/services`)
+      .set(as(tokenA))
+      .send({ name: "API", monitorIds: [String(ids.api)] })
+      .expect(201);
+    await request(app).post(`/api/status-pages/${pageId}/publish`).set(as(tokenMember)).expect(200);
+    await request(app)
+      .get(`/api/status-pages/${pageId}/subscribers`)
+      .set(as(tokenMember))
+      .expect(200);
+    await request(app)
+      .patch(`/api/status-pages/${pageId}`)
+      .set(as(tokenMember))
+      .send({ name: "Renamed" })
+      .expect(200);
+    await request(app).get("/api/public/status-pages/team-page").expect(200);
+  });
+
+  it("rejects non-members and malformed workspace headers", async () => {
+    const response = await request(app).get("/api/status-pages").set(as(tokenB, wsA));
+    expect(response.status).toBe(404);
+    expect(response.body.code).toBe("WORKSPACE_NOT_FOUND");
+    const malformed = await request(app)
+      .get("/api/status-pages")
+      .set({ Authorization: `Bearer ${tokenA}`, "X-Workspace-Id": "not-an-id" });
+    expect(malformed.status).toBe(404);
+    const unknown = await request(app)
+      .get("/api/status-pages")
+      .set(as(tokenA, new Types.ObjectId()));
+    expect(unknown.status).toBe(404);
+  });
+
+  it("keeps pages and services of one workspace unreachable from another", async () => {
+    const pageId = await publishedPage();
+    const otherPage = await createPage(tokenB, { slug: "b-page", name: "B Page" });
+    expect(otherPage.status).toBe(201);
+    const serviceId = (
+      await request(app).get(`/api/status-pages/${pageId}/services`).set(as(tokenA))
+    ).body.items[0].id as string;
+
+    const fromB = [
+      request(app).get(`/api/status-pages/${pageId}`).set(as(tokenB, wsB)),
+      request(app).patch(`/api/status-pages/${pageId}`).set(as(tokenB, wsB)).send({ name: "X" }),
+      request(app).post(`/api/status-pages/${pageId}/publish`).set(as(tokenB, wsB)),
+      request(app)
+        .patch(`/api/status-pages/${pageId}/services/${serviceId}`)
+        .set(as(tokenB, wsB))
+        .send({ name: "X" }),
+      request(app).delete(`/api/status-pages/${pageId}/services/${serviceId}`).set(as(tokenB, wsB)),
+      request(app).post(`/api/status-pages/${pageId}/preview`).set(as(tokenB, wsB)),
+    ];
+    for (const attempt of fromB) expect((await attempt).status).toBe(404);
+
+    const serviceOnForeign = await request(app)
+      .post(`/api/status-pages/${otherPage.body.page.id}/services`)
+      .set(as(tokenB, wsB))
+      .send({ name: "Mine", monitorIds: [String(ids.api)] });
+    expect(serviceOnForeign.status).toBe(400);
+    expect(serviceOnForeign.body.code).toBe("INVALID_MONITOR_SELECTION");
+    expect(services.docs).toHaveLength(1);
+
+    const options = await request(app)
+      .get("/api/status-pages/monitor-options")
+      .set(as(tokenB, wsB));
+    expect(options.body.items.map((item: { name: string }) => item.name)).toEqual(["Foreign"]);
+  });
+
+  it("applies the page limit per workspace", async () => {
+    for (let index = 0; index < 10; index += 1) {
+      await createPage(tokenA, { slug: `ws-page-${index}` }).then((res) =>
+        expect(res.status).toBe(201),
+      );
+    }
+    expect((await createPage(tokenA, { slug: "ws-page-extra" })).status).toBe(409);
+    expect((await createPage(tokenB, { slug: "other-ws-page" })).status).toBe(201);
+  });
+
+  it("hides public pages once their workspace is deleted", async () => {
+    await publishedPage();
+    await request(app).get("/api/public/status-pages/acme-status").expect(200);
+    workspaceStores.workspaces.docs.find((doc) => String(doc._id) === String(wsA))!.status =
+      "deleted";
+    for (const path of ["", "/incidents", "/history"]) {
+      await request(app).get(`/api/public/status-pages/acme-status${path}`).expect(404);
+    }
+    await request(app)
+      .post("/api/public/status-pages/acme-status/subscribe")
+      .send({ email: "visitor@example.com" })
+      .expect(404);
+    const management = await request(app).get("/api/status-pages").set(as(tokenA));
+    expect(management.status).toBe(404);
+    expect(management.body.code).toBe("WORKSPACE_NOT_FOUND");
+  });
+
+  it("revokes access immediately when a member is removed", async () => {
+    await request(app).get("/api/status-pages").set(as(tokenMember)).expect(200);
+    const membership = workspaceStores.members.docs.find(
+      (doc) => String(doc.userId) === String(userMember),
+    )!;
+    membership.status = "removed";
+    const response = await request(app).get("/api/status-pages").set(as(tokenMember));
+    expect(response.status).toBe(404);
   });
 });

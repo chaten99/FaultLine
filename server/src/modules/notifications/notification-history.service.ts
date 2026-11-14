@@ -15,8 +15,8 @@ export type DeliveryListOptions = {
   to?: Date;
 };
 
-export const listDeliveries = async (userId: string, options: DeliveryListOptions) => {
-  const filter: Record<string, unknown> = { userId };
+export const listDeliveries = async (workspaceId: string, options: DeliveryListOptions) => {
+  const filter: Record<string, unknown> = { workspaceId: new Types.ObjectId(workspaceId) };
   if (options.status) filter.status = options.status;
   if (options.channel) filter.channel = options.channel;
   if (options.eventType) filter.eventType = options.eventType;
@@ -43,17 +43,20 @@ export const listDeliveries = async (userId: string, options: DeliveryListOption
   };
 };
 
-export const getDelivery = async (userId: string, id: string) => {
+export const getDelivery = async (workspaceId: string, id: string) => {
   if (!Types.ObjectId.isValid(id)) {
     throw createApiError("Delivery not found.", 404, "DELIVERY_NOT_FOUND");
   }
-  const delivery = await NotificationDelivery.findOne({ _id: id, userId }).select("-snapshot");
+  const delivery = await NotificationDelivery.findOne({
+    _id: id,
+    workspaceId: new Types.ObjectId(workspaceId),
+  }).select("-snapshot");
   if (!delivery) throw createApiError("Delivery not found.", 404, "DELIVERY_NOT_FOUND");
   return { delivery: toDeliveryDetail(delivery) };
 };
 
-export const retryDelivery = async (userId: string, id: string) => {
-  const delivery = await retryFailedDelivery(userId, id);
+export const retryDelivery = async (workspaceId: string, id: string) => {
+  const delivery = await retryFailedDelivery(workspaceId, id);
   if (!delivery) throw createApiError("Delivery not found.", 404, "DELIVERY_NOT_FOUND");
   return { delivery: toDeliverySummary(delivery) };
 };

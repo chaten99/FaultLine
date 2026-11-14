@@ -26,6 +26,15 @@ const range = { from: new Date(T0), to: now };
 
 const userId = new Types.ObjectId();
 const otherUserId = new Types.ObjectId();
+const workspaceId = new Types.ObjectId();
+const otherWorkspaceId = new Types.ObjectId();
+const ctx = (user: Types.ObjectId, workspace: Types.ObjectId) => ({
+  userId: String(user),
+  workspaceId: String(workspace),
+  role: "owner" as const,
+});
+const ownCtx = ctx(userId, workspaceId);
+const otherCtx = ctx(otherUserId, otherWorkspaceId);
 const monitorId = new Types.ObjectId();
 const otherMonitorId = new Types.ObjectId();
 
@@ -89,6 +98,7 @@ describe.skipIf(!uri)("analytics aggregations against MongoDB", () => {
 
     const monitorDoc = (id: Types.ObjectId, owner: Types.ObjectId, name: string) => ({
       _id: id,
+      workspaceId: owner === userId ? workspaceId : otherWorkspaceId,
       userId: owner,
       name,
       url: "https://api.example.com/health?token=SECRET",
@@ -166,6 +176,7 @@ describe.skipIf(!uri)("analytics aggregations against MongoDB", () => {
 
     await Incident.collection.insertMany([
       {
+        workspaceId,
         monitorId,
         userId,
         title: "Incident A",
@@ -179,6 +190,7 @@ describe.skipIf(!uri)("analytics aggregations against MongoDB", () => {
         updatedAt: new Date(T0 + 41 * M),
       },
       {
+        workspaceId,
         monitorId,
         userId,
         title: "Incident B (overlaps A)",
@@ -200,7 +212,7 @@ describe.skipIf(!uri)("analytics aggregations against MongoDB", () => {
   });
 
   it("computes check success rate from eligible terminal checks only", async () => {
-    const { current } = await getOverview(String(userId), range, now);
+    const { current } = await getOverview(ownCtx, range, now);
     const successful = eligible.filter((seed) => seed.status === "success").length;
     expect(current.totalChecks).toBe(eligible.length);
     expect(current.successRate).toEqual({
@@ -212,7 +224,7 @@ describe.skipIf(!uri)("analytics aggregations against MongoDB", () => {
   });
 
   it("computes availability, downtime and coverage from lifecycle, gaps and incident windows", async () => {
-    const { current } = await getOverview(String(userId), range, now);
+    const { current } = await getOverview(ownCtx, range, now);
     expect(current.availability).toEqual({
       percent: 93.72,
       state: "ok",
@@ -230,7 +242,7 @@ describe.skipIf(!uri)("analytics aggregations against MongoDB", () => {
   });
 
   it("computes latency statistics with exact nearest-rank percentiles from real observations", async () => {
-    const { current } = await getOverview(String(userId), range, now);
+    const { current } = await getOverview(ownCtx, range, now);
     const sum = latencyValues.reduce((total, value) => total + value, 0);
     expect(current.responseTime).toEqual({
       samples: latencyValues.length,
@@ -244,7 +256,7 @@ describe.skipIf(!uri)("analytics aggregations against MongoDB", () => {
   });
 
   it("buckets response times without inventing points for periods without observations", async () => {
-    const result = await getResponseTimes(String(userId), range, now);
+    const result = await getResponseTimes(ownCtx, range, now);
     const hours = result.series.map((bucket) => Date.parse(bucket.start));
     expect(result.window.bucketSeconds).toBe(900);
     expect(hours.every((start) => start % (15 * M) === 0)).toBe(true);
@@ -261,7 +273,7 @@ describe.skipIf(!uri)("analytics aggregations against MongoDB", () => {
   });
 
   it("builds a timeline that separates paused, unknown and down periods", async () => {
-    const result = await getAvailability(String(userId), range, now);
+    const result = await getAvailability(ownCtx, range, now);
     const state = (minute: number) =>
       result.timeline.find((cell) => Date.parse(cell.start) === T0 + minute * M)?.state;
     expect(state(0)).toBe("up");
@@ -277,7 +289,7 @@ describe.skipIf(!uri)("analytics aggregations against MongoDB", () => {
 
   it("reports per-monitor analytics with sanitized endpoints", async () => {
     const result = await getMonitorTable(
-      String(userId),
+      ownCtx,
       {
         ...range,
         page: 1,
@@ -300,22 +312,34 @@ describe.skipIf(!uri)("analytics aggregations against MongoDB", () => {
   });
 
   it("scopes everything to the owning user", async () => {
-    const other = await getOverview(String(otherUserId), range, now);
+    const other = await getOverview(otherCtx, range, now);
     expect(other.current.totalChecks).toBe(1);
     expect(other.current.responseTime.max).toBe(9999);
     await expect(
-      getMonitorAnalytics(String(otherUserId), String(monitorId), range, now),
+      getMonitorAnalytics(otherCtx, String(monitorId), range, now),
     ).rejects.toMatchObject({
       statusCode: 404,
     });
-    const mine = await getMonitorAnalytics(String(userId), String(monitorId), range, now);
+    const mine = await getMonitorAnalytics(ownCtx, String(monitorId), range, now);
     expect(mine.summary.totalChecks).toBe(eligible.length);
     expect(mine.downtimePeriods).toHaveLength(1);
     expect(mine.downtimePeriods[0]?.durationMs).toBe(15 * M);
   });
 
+  it("scopes by workspace even for the same user", async () => {
+    const crossed = ctx(userId, otherWorkspaceId);
+    await expect(getMonitorAnalytics(crossed, String(monitorId), range, now)).rejects.toMatchObject(
+      {
+        statusCode: 404,
+      },
+    );
+    const overview = await getOverview(crossed, range, now);
+    expect(overview.current.totalChecks).toBe(1);
+    expect(overview.current.incidents.total).toBe(0);
+  });
+
   it("summarizes incidents and excludes nothing it should keep", async () => {
-    const result = await getIncidentAnalytics(String(userId), range, now);
+    const result = await getIncidentAnalytics(ownCtx, range, now);
     expect(result.summary).toMatchObject({
       total: 2,
       resolved: 2,
@@ -326,7 +350,7 @@ describe.skipIf(!uri)("analytics aggregations against MongoDB", () => {
   });
 
   it("exports CSV that matches the computed values", async () => {
-    const report = await buildExport(String(userId), "overview", range, now);
+    const report = await buildExport(ownCtx, "overview", range, now);
     expect(report.csv).toContain("availability,93.72,percent,state=ok");
     expect(report.csv).toContain(`total_completed_checks,${eligible.length},count,`);
     expect(report.filename).toBe("faultline-overview-2026-01-01_2026-01-01.csv");
@@ -334,7 +358,7 @@ describe.skipIf(!uri)("analytics aggregations against MongoDB", () => {
 
   it("returns an insufficient state for a window before the monitor existed", async () => {
     const early = { from: new Date(T0 - 10 * H), to: new Date(T0 - 5 * H) };
-    const { current } = await getOverview(String(userId), early, now);
+    const { current } = await getOverview(ownCtx, early, now);
     expect(current.availability).toMatchObject({
       percent: null,
       state: "insufficient",
