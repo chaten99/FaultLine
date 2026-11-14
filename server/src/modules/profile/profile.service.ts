@@ -3,6 +3,7 @@ import { createApiError } from "../../lib/errors/create-api-error.js";
 import { User } from "../auth/user.model.js";
 import { Incident } from "../incidents/incident.model.js";
 import { Monitor } from "../monitors/monitor.model.js";
+import { listUserWorkspaceIds } from "../workspaces/workspace-core.service.js";
 
 const toProfileUser = (user: {
   _id: unknown;
@@ -18,12 +19,12 @@ const toProfileUser = (user: {
   createdAt: new Date(user.createdAt ?? Date.now()).toISOString(),
 });
 
-const countStatusPages = async (userId: string): Promise<number> => {
-  if (mongoose.connection.readyState !== 1) return 0;
+const countStatusPages = async (workspaceIds: Types.ObjectId[]): Promise<number> => {
+  if (mongoose.connection.readyState !== 1 || workspaceIds.length === 0) return 0;
   try {
     return await mongoose.connection
       .collection("publicstatuspages")
-      .countDocuments({ ownerId: new Types.ObjectId(userId) });
+      .countDocuments({ workspaceId: { $in: workspaceIds } });
   } catch {
     return 0;
   }
@@ -32,12 +33,13 @@ const countStatusPages = async (userId: string): Promise<number> => {
 export const getProfile = async (userId: string) => {
   const user = await User.findById(userId).lean();
   if (!user) throw createApiError("Authentication required.", 401, "AUTHENTICATION_REQUIRED");
-  const owner = new Types.ObjectId(userId);
+  const workspaceIds = (await listUserWorkspaceIds(userId)).map((id) => new Types.ObjectId(id));
+  const scope = { workspaceId: { $in: workspaceIds } };
   const [monitors, activeMonitors, openIncidents, statusPages] = await Promise.all([
-    Monitor.countDocuments({ userId: owner }),
-    Monitor.countDocuments({ userId: owner, active: true }),
-    Incident.countDocuments({ userId: owner, status: { $in: ["open", "acknowledged"] } }),
-    countStatusPages(userId),
+    Monitor.countDocuments(scope),
+    Monitor.countDocuments({ ...scope, active: true }),
+    Incident.countDocuments({ ...scope, status: { $in: ["open", "acknowledged"] } }),
+    countStatusPages(workspaceIds),
   ]);
   return {
     user: toProfileUser(user),

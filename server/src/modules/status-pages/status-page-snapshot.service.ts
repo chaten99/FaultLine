@@ -73,19 +73,22 @@ export const getCachedHistory = async <T>(
 const toObjectIds = (ids: string[]) => ids.map((id) => new Types.ObjectId(id));
 
 export const loadMonitorSnapshots = async (
-  ownerId: string,
+  workspaceId: string,
   monitorIds: string[],
 ): Promise<Map<string, MonitorSnapshot>> => {
   const result = new Map<string, MonitorSnapshot>();
   if (monitorIds.length === 0) return result;
   const unique = [...new Set(monitorIds)];
   const [monitors, incidents, latest] = await Promise.all([
-    Monitor.find({ _id: { $in: toObjectIds(unique) }, userId: new Types.ObjectId(ownerId) })
+    Monitor.find({
+      _id: { $in: toObjectIds(unique) },
+      workspaceId: new Types.ObjectId(workspaceId),
+    })
       .select("name url active intervalSeconds")
       .lean(),
     Incident.find({
       monitorId: { $in: toObjectIds(unique) },
-      userId: new Types.ObjectId(ownerId),
+      workspaceId: new Types.ObjectId(workspaceId),
       status: { $in: ["open", "acknowledged"] },
     })
       .select("monitorId")
@@ -139,12 +142,12 @@ export const monitorStateMap = (
   new Map([...monitors.entries()].map(([id, monitor]) => [id, classifyMonitor(monitor, now)]));
 
 export const computeServiceBlocks = async (
-  ownerId: string,
+  workspaceId: string,
   services: ServiceLite[],
   now: number,
 ): Promise<{ blocks: Map<string, ServiceStatusBlock>; monitors: Map<string, MonitorSnapshot> }> => {
   const monitors = await loadMonitorSnapshots(
-    ownerId,
+    workspaceId,
     services.flatMap((service) => service.monitorIds),
   );
   const blocks = new Map(
@@ -237,12 +240,12 @@ const toIncidentLite = (row: {
 const incidentFields = "monitorId status firstFailureAt openedAt acknowledgedAt resolvedAt";
 
 export const loadActiveIncidents = async (
-  ownerId: string,
+  workspaceId: string,
   monitorIds: string[],
 ): Promise<IncidentLite[]> => {
   if (monitorIds.length === 0) return [];
   const rows = await Incident.find({
-    userId: new Types.ObjectId(ownerId),
+    workspaceId: new Types.ObjectId(workspaceId),
     monitorId: { $in: toObjectIds([...new Set(monitorIds)]) },
     status: { $in: ["open", "acknowledged"] },
   })
@@ -254,17 +257,17 @@ export const loadActiveIncidents = async (
 };
 
 export const buildStatusSnapshot = async (
-  ownerId: string,
+  workspaceId: string,
   services: ServiceLite[],
   now: number,
 ): Promise<PageStatusSnapshot> => {
   const enabled = services.filter((service) => service.enabled);
-  const { blocks } = await computeServiceBlocks(ownerId, enabled, now);
+  const { blocks } = await computeServiceBlocks(workspaceId, enabled, now);
   const serviceBlocks = enabled.map((service) => blocks.get(service.id) as ServiceStatusBlock);
   const overall = aggregateOverall(serviceBlocks.map((block) => block.status));
   const names = serviceNamesByMonitor(enabled);
   const active = await loadActiveIncidents(
-    ownerId,
+    workspaceId,
     enabled.flatMap((service) => service.monitorIds),
   );
   return {
@@ -282,19 +285,19 @@ export const buildStatusSnapshot = async (
 
 export const getCachedStatusSnapshot = async (
   pageId: string,
-  ownerId: string,
+  workspaceId: string,
   services: ServiceLite[],
   now = Date.now(),
 ): Promise<PageStatusSnapshot> => {
   const cached = cache.get(pageId);
   if (cached && cached.expires > now) return cached.value;
-  const value = await buildStatusSnapshot(ownerId, services, now);
+  const value = await buildStatusSnapshot(workspaceId, services, now);
   cache.set(pageId, { expires: now + cacheTtlMs, value });
   return value;
 };
 
 export const listPublicIncidents = async (
-  ownerId: string,
+  workspaceId: string,
   services: ServiceLite[],
   query: { status: "all" | "active" | "resolved"; page: number; pageSize: number },
   now = Date.now(),
@@ -304,7 +307,7 @@ export const listPublicIncidents = async (
   if (monitorIds.length === 0) return { items: [], total: 0 };
   const names = serviceNamesByMonitor(enabled);
   const filter: Record<string, unknown> = {
-    userId: new Types.ObjectId(ownerId),
+    workspaceId: new Types.ObjectId(workspaceId),
     monitorId: { $in: toObjectIds(monitorIds) },
     firstFailureAt: { $gte: new Date(now - 90 * 24 * 60 * 60 * 1000) },
   };

@@ -3,6 +3,7 @@ import { pageStatuses, type PageStatus, type SubscriberEvents } from "./status-p
 
 export interface IPublicStatusPage {
   _id: Types.ObjectId;
+  workspaceId: Types.ObjectId;
   ownerId: Types.ObjectId;
   name: string;
   slug: string;
@@ -18,6 +19,7 @@ export interface IPublicStatusPage {
 
 const statusPageSchema = new Schema<IPublicStatusPage>(
   {
+    workspaceId: { type: Schema.Types.ObjectId, ref: "Workspace", required: true },
     ownerId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     name: { type: String, required: true, trim: true, maxlength: 80 },
     slug: {
@@ -45,7 +47,8 @@ const statusPageSchema = new Schema<IPublicStatusPage>(
   { timestamps: true },
 );
 
-statusPageSchema.index({ ownerId: 1, createdAt: -1 });
+statusPageSchema.index({ workspaceId: 1, createdAt: -1 });
+statusPageSchema.index({ ownerId: 1 });
 statusPageSchema.index({ status: 1, slug: 1 });
 
 export const PublicStatusPage = model<IPublicStatusPage>("PublicStatusPage", statusPageSchema);

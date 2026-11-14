@@ -4,6 +4,7 @@ import { Redis } from "ioredis";
 import { clientOrigins, env } from "../config/env.js";
 import { logger } from "../config/logger.js";
 import { registerPublicNamespace, routePublicEvent } from "./public-realtime.js";
+import { routeWorkspaceEvent, selectWorkspace, userRoom } from "./workspace-realtime.js";
 import { getAccessTokenExpiry, verifyAccessToken } from "../modules/auth/auth-token.service.js";
 
 const channel = "faultline:domain-events";
@@ -25,7 +26,12 @@ export const startMonitorRealtime = async (httpServer: HttpServer) => {
     }
   });
   io.on("connection", (socket) => {
-    void socket.join(`user:${socket.data.userId as string}`);
+    void socket.join(userRoom(socket.data.userId as string));
+    socket.on("workspace:select", (payload: unknown, ack?: (response: { ok: boolean }) => void) => {
+      void selectWorkspace(socket, payload, ack).catch(() => {
+        if (typeof ack === "function") ack({ ok: false });
+      });
+    });
     const delay = Math.max(0, Number(socket.data.expiresAt) * 1000 - Date.now());
     const expiryTimer = setTimeout(() => socket.disconnect(true), delay);
     socket.once("disconnect", () => clearTimeout(expiryTimer));
@@ -45,24 +51,14 @@ export const startMonitorRealtime = async (httpServer: HttpServer) => {
       const event = JSON.parse(raw) as {
         type?: string;
         userId?: string;
+        workspaceId?: string;
         pageId?: string;
         payload?: Record<string, unknown>;
       };
       if (routePublicEvent(publicNamespace, event)) return;
-      if (
-        !event.type ||
-        !event.userId ||
-        !event.payload ||
-        !(
-          event.type.startsWith("monitor.check.") ||
-          event.type.startsWith("incident.") ||
-          event.type.startsWith("notification.")
-        )
-      )
-        return;
-      io.to(`user:${event.userId}`).emit(event.type, event.payload);
+      routeWorkspaceEvent(io, event);
     } catch {
-      logger.warn("Discarded malformed monitor domain event");
+      logger.warn("Discarded malformed domain event");
     }
   });
 

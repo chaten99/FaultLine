@@ -28,6 +28,11 @@ import {
 import { processNotificationJob } from "../src/workers/notification.worker.js";
 import { sendDelivery } from "../src/modules/notifications/notification-sender.service.js";
 import { bindMemoryModel } from "./helpers/memory-model.js";
+import {
+  bindWorkspaceModels,
+  resetWorkspaceModels,
+  seedWorkspace,
+} from "./helpers/workspace-fixtures.js";
 import type { ChannelResult } from "../src/modules/notifications/notification.types.js";
 
 const queueAdd = vi.hoisted(() => vi.fn());
@@ -62,12 +67,14 @@ vi.mock("../src/modules/notifications/notification-sender.service.js", () => ({
   sendDelivery: vi.fn(),
 }));
 
+const workspaceStores = bindWorkspaceModels();
+
 const stores = {
   users: bindMemoryModel(User),
   incidents: bindMemoryModel(Incident),
   timeline: bindMemoryModel(IncidentTimeline),
   monitors: bindMemoryModel(Monitor),
-  prefs: bindMemoryModel(NotificationPreferences, { uniqueKeys: ["userId"] }),
+  prefs: bindMemoryModel(NotificationPreferences),
   integrations: bindMemoryModel(NotificationIntegration),
   outbox: bindMemoryModel(NotificationOutbox, { uniqueKeys: ["eventId"] }),
   deliveries: bindMemoryModel(NotificationDelivery, { uniqueKeys: ["deliveryKey"] }),
@@ -97,12 +104,15 @@ const permanent: ChannelResult = {
 
 const userId = new Types.ObjectId();
 const otherUserId = new Types.ObjectId();
+const workspaceId = new Types.ObjectId();
+const otherWorkspaceId = new Types.ObjectId();
 const monitorId = new Types.ObjectId();
 const incidentId = new Types.ObjectId();
 
 const seedIncident = (overrides: Record<string, unknown> = {}) => {
   stores.incidents.docs.push({
     _id: incidentId,
+    workspaceId,
     userId,
     monitorId,
     title: "Incident on Checkout API: UNEXPECTED_STATUS",
@@ -121,6 +131,7 @@ const seedIntegration = (overrides: Record<string, unknown> = {}) => {
   const id = new Types.ObjectId();
   stores.integrations.docs.push({
     _id: id,
+    workspaceId,
     userId,
     type: "slack",
     name: "Ops channel",
@@ -139,6 +150,8 @@ const outbox = () => stores.outbox.docs;
 
 beforeEach(() => {
   Object.values(stores).forEach((store) => store.reset());
+  resetWorkspaceModels(workspaceStores);
+  seedWorkspace(workspaceStores, { id: workspaceId, ownerId: userId });
   queueAdd.mockReset();
   queueAdd.mockResolvedValue({ id: "job" });
   sendMock.mockReset();
@@ -152,6 +165,7 @@ beforeEach(() => {
   });
   stores.monitors.docs.push({
     _id: monitorId,
+    workspaceId,
     userId,
     name: "Checkout API",
     failureThreshold: 3,
@@ -204,7 +218,12 @@ describe("incident lifecycle events become durable notifications", () => {
       eventType: "incident.opened",
       kind: "incident",
       status: "queued",
-      deliveryKey: buildDeliveryKey(`incident.opened:${String(incidentId)}`, "email"),
+      deliveryKey: buildDeliveryKey(
+        `incident.opened:${String(incidentId)}`,
+        "email",
+        undefined,
+        String(userId),
+      ),
     });
     expect(queueAdd).toHaveBeenCalledTimes(1);
     expect(queueAdd).toHaveBeenCalledWith(
@@ -273,6 +292,7 @@ describe("notification preferences gate delivery", () => {
   it("sends acknowledgement when the user opts in", async () => {
     stores.prefs.docs.push({
       _id: new Types.ObjectId(),
+      workspaceId,
       userId,
       events: { acknowledged: true },
     });
@@ -284,8 +304,7 @@ describe("notification preferences gate delivery", () => {
   });
 
   it("sends nothing when notifications are globally disabled", async () => {
-    stores.prefs.docs.push({ _id: new Types.ObjectId(), userId, enabled: false });
-    seedIntegration();
+    stores.prefs.docs.push({ _id: new Types.ObjectId(), workspaceId, userId, enabled: false });
     await dispatchOpened();
     expect(deliveries()).toHaveLength(0);
     expect(queueAdd).not.toHaveBeenCalled();
@@ -293,13 +312,23 @@ describe("notification preferences gate delivery", () => {
   });
 
   it("sends nothing when the event type is disabled", async () => {
-    stores.prefs.docs.push({ _id: new Types.ObjectId(), userId, events: { opened: false } });
+    stores.prefs.docs.push({
+      _id: new Types.ObjectId(),
+      workspaceId,
+      userId,
+      events: { opened: false },
+    });
     await dispatchOpened();
     expect(deliveries()).toHaveLength(0);
   });
 
   it("skips email when the channel is off or the address is unverified", async () => {
-    stores.prefs.docs.push({ _id: new Types.ObjectId(), userId, channels: { email: false } });
+    stores.prefs.docs.push({
+      _id: new Types.ObjectId(),
+      workspaceId,
+      userId,
+      channels: { email: false },
+    });
     await dispatchOpened();
     expect(deliveries()).toHaveLength(0);
 
@@ -314,7 +343,11 @@ describe("notification preferences gate delivery", () => {
     const subscribed = seedIntegration({ name: "Subscribed" });
     seedIntegration({ name: "Paused", enabled: false });
     seedIntegration({ name: "Resolved only", events: ["incident.resolved"] });
-    seedIntegration({ name: "Someone else", userId: otherUserId });
+    seedIntegration({
+      name: "Other workspace",
+      workspaceId: otherWorkspaceId,
+      userId: otherUserId,
+    });
     await dispatchOpened();
     const slack = deliveries().filter((d) => d.channel === "slack");
     expect(slack).toHaveLength(1);
@@ -323,26 +356,28 @@ describe("notification preferences gate delivery", () => {
     expect(deliveries()).toHaveLength(2);
   });
 
-  it("respects per-channel switches for integrations", async () => {
+  it("does not let one member's alert preferences block shared integrations", async () => {
     seedIntegration();
     seedIntegration({ type: "webhook", name: "Hook" });
     stores.prefs.docs.push({
       _id: new Types.ObjectId(),
+      workspaceId,
       userId,
-      channels: { slack: false },
+      enabled: false,
     });
     await dispatchOpened();
     expect(
       deliveries()
         .map((d) => d.channel)
         .sort(),
-    ).toEqual(["email", "webhook"]);
+    ).toEqual(["slack", "webhook"]);
   });
 
-  it("isolates one user's events from another user's integrations", async () => {
-    seedIntegration({ userId: otherUserId });
+  it("isolates one workspace's events from another workspace's integrations", async () => {
+    seedIntegration({ workspaceId: otherWorkspaceId, userId: otherUserId });
     await dispatchOpened();
-    expect(deliveries().every((d) => String(d.userId) === String(userId))).toBe(true);
+    expect(deliveries().every((d) => String(d.workspaceId) === String(workspaceId))).toBe(true);
+    expect(deliveries().some((d) => d.channel === "slack")).toBe(false);
   });
 });
 
@@ -387,10 +422,11 @@ describe("deduplication and idempotency", () => {
     seedIncident();
     await persistOutboxEvent("incident.opened", String(incidentId));
     const eventId = `incident.opened:${String(incidentId)}`;
-    const key = buildDeliveryKey(eventId, "email");
+    const key = buildDeliveryKey(eventId, "email", undefined, String(userId));
     stores.deliveries.docs.push({
       _id: new Types.ObjectId(),
       deliveryKey: key,
+      workspaceId,
       userId,
       channel: "email",
       eventId,
@@ -488,6 +524,7 @@ describe("outbox recovery", () => {
     stores.deliveries.docs.push({
       _id: id,
       deliveryKey: "k1",
+      workspaceId,
       userId,
       channel: "email",
       eventId: "e",
@@ -515,6 +552,7 @@ describe("delivery processing, retry and backoff", () => {
     stores.deliveries.docs.push({
       _id: id,
       deliveryKey: `key-${String(id)}`,
+      workspaceId,
       userId,
       channel: "slack",
       integrationId: new Types.ObjectId(),
@@ -698,7 +736,7 @@ describe("delivery processing, retry and backoff", () => {
         attempts: 5,
         failureCategory: "INVALID_CREDENTIALS",
       });
-      const updated = await retryFailedDelivery(String(userId), String(id));
+      const updated = await retryFailedDelivery(String(workspaceId), String(id));
       expect(updated).toMatchObject({ generation: 1, attempts: 0 });
       expect(queueAdd).toHaveBeenCalledWith(
         "deliver",
@@ -709,9 +747,13 @@ describe("delivery processing, retry and backoff", () => {
       expect(find(id).failureCategory).toBeUndefined();
     });
 
-    it("refuses to retry another user's delivery", async () => {
-      const id = seedDelivery({ status: "failed", userId: otherUserId });
-      await expect(retryFailedDelivery(String(userId), String(id))).rejects.toMatchObject({
+    it("refuses to retry another workspace's delivery", async () => {
+      const id = seedDelivery({
+        status: "failed",
+        workspaceId: otherWorkspaceId,
+        userId: otherUserId,
+      });
+      await expect(retryFailedDelivery(String(workspaceId), String(id))).rejects.toMatchObject({
         statusCode: 404,
         code: "DELIVERY_NOT_FOUND",
       });
@@ -725,7 +767,7 @@ describe("delivery processing, retry and backoff", () => {
         { status: "failed", kind: "test" },
       ]) {
         const id = seedDelivery(overrides);
-        await expect(retryFailedDelivery(String(userId), String(id))).rejects.toMatchObject({
+        await expect(retryFailedDelivery(String(workspaceId), String(id))).rejects.toMatchObject({
           statusCode: 409,
           code: "DELIVERY_NOT_RETRYABLE",
         });
@@ -736,7 +778,7 @@ describe("delivery processing, retry and backoff", () => {
     it("keeps the delivery pending for recovery if Redis is down during retry", async () => {
       const id = seedDelivery({ status: "failed" });
       queueAdd.mockRejectedValue(new Error("Redis down"));
-      await retryFailedDelivery(String(userId), String(id));
+      await retryFailedDelivery(String(workspaceId), String(id));
       expect(find(id).status).toBe("pending");
     });
   });

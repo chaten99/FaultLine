@@ -19,9 +19,18 @@ const toIso = (value: Date | undefined | null): string | null =>
 
 export const loadIncidentSnapshot = async (
   incidentId: string,
-): Promise<{ snapshot: IncidentNotificationSnapshot; userId: Types.ObjectId } | null> => {
+): Promise<{
+  snapshot: IncidentNotificationSnapshot;
+  userId: Types.ObjectId;
+  workspaceId: Types.ObjectId;
+} | null> => {
   const incident = await Incident.findById(incidentId).lean();
   if (!incident) return null;
+  const workspaceId = (incident as { workspaceId?: Types.ObjectId }).workspaceId;
+  if (!workspaceId) {
+    logger.warn({ incidentId }, "Incident has no workspace; notification skipped");
+    return null;
+  }
   const [monitor, created, acknowledger] = await Promise.all([
     Monitor.findById(incident.monitorId).select("name failureThreshold recoveryThreshold").lean(),
     IncidentTimeline.findOne({ incidentId: incident._id, type: "incident.created" }).lean(),
@@ -50,7 +59,7 @@ export const loadIncidentSnapshot = async (
     recoveryCheckCount: incident.recoveryCheckCount ?? null,
     incidentUrl: `${env.APP_ORIGIN.replace(/\/+$/, "")}/incidents/${String(incident._id)}`,
   };
-  return { snapshot, userId: incident.userId };
+  return { snapshot, userId: incident.userId, workspaceId };
 };
 
 export const persistOutboxEvent = async (
@@ -78,6 +87,7 @@ export const persistOutboxEvent = async (
       $setOnInsert: {
         eventId,
         type,
+        workspaceId: loaded.workspaceId,
         userId: loaded.userId,
         incidentId: new Types.ObjectId(incidentId),
         snapshot,

@@ -16,6 +16,7 @@ import {
   NotificationIntegration,
   type INotificationIntegration,
 } from "./notification-integration.model.js";
+import type { WorkspaceContext } from "../workspaces/workspace.types.js";
 import { toDeliverySummary } from "./notification-presenter.js";
 import {
   assertPermittedUrl,
@@ -119,16 +120,23 @@ const loadLastDelivery = async (integrationId: Types.ObjectId): Promise<LastDeli
   };
 };
 
-export const listIntegrations = async (userId: string) => {
-  const items = await NotificationIntegration.find({ userId }).sort({ createdAt: -1 }).limit(50);
+export const listIntegrations = async (ctx: WorkspaceContext) => {
+  const items = await NotificationIntegration.find({
+    workspaceId: new Types.ObjectId(ctx.workspaceId),
+  })
+    .sort({ createdAt: -1 })
+    .limit(50);
   const views = await Promise.all(
     items.map(async (item) => toIntegrationView(item, await loadLastDelivery(item._id))),
   );
   return { items: views };
 };
 
-const ensureCapacity = async (userId: string, type: IntegrationType) => {
-  const count = await NotificationIntegration.countDocuments({ userId, type });
+const ensureCapacity = async (ctx: WorkspaceContext, type: IntegrationType) => {
+  const count = await NotificationIntegration.countDocuments({
+    workspaceId: new Types.ObjectId(ctx.workspaceId),
+    type,
+  });
   if (count >= maxIntegrationsPerType) {
     throw createApiError(
       `You can configure up to ${maxIntegrationsPerType} ${type} integrations.`,
@@ -145,58 +153,63 @@ type CreateInput = {
 };
 
 export const createSlackIntegration = async (
-  userId: string,
+  ctx: WorkspaceContext,
   input: CreateInput & { webhookUrl: string },
 ) => {
   requireConfigured();
   validateSlackUrl(input.webhookUrl);
-  await ensureCapacity(userId, "slack");
+  await ensureCapacity(ctx, "slack");
   const id = new Types.ObjectId();
   const created = await NotificationIntegration.create({
     _id: id,
-    userId,
+    workspaceId: new Types.ObjectId(ctx.workspaceId),
+    userId: ctx.userId,
     type: "slack",
     name: input.name,
     enabled: input.enabled,
     events: input.events,
-    encryptedUrl: encryptSecret(input.webhookUrl, `${userId}:${String(id)}:url`),
+    encryptedUrl: encryptSecret(input.webhookUrl, `${ctx.userId}:${String(id)}:url`),
     urlHint: maskSlackUrl(input.webhookUrl),
   });
   return { integration: toIntegrationView(created) };
 };
 
 export const createWebhookIntegration = async (
-  userId: string,
+  ctx: WorkspaceContext,
   input: CreateInput & { url: string },
 ) => {
   requireConfigured();
   await validateWebhookUrl(input.url);
-  await ensureCapacity(userId, "webhook");
+  await ensureCapacity(ctx, "webhook");
   const id = new Types.ObjectId();
   const signingSecret = generateSigningSecret();
   const created = await NotificationIntegration.create({
     _id: id,
-    userId,
+    workspaceId: new Types.ObjectId(ctx.workspaceId),
+    userId: ctx.userId,
     type: "webhook",
     name: input.name,
     enabled: input.enabled,
     events: input.events,
-    encryptedUrl: encryptSecret(input.url, `${userId}:${String(id)}:url`),
-    encryptedSigningSecret: encryptSecret(signingSecret, `${userId}:${String(id)}:secret`),
+    encryptedUrl: encryptSecret(input.url, `${ctx.userId}:${String(id)}:url`),
+    encryptedSigningSecret: encryptSecret(signingSecret, `${ctx.userId}:${String(id)}:secret`),
     urlHint: maskWebhookUrl(input.url),
   });
   return { integration: toIntegrationView(created), signingSecret };
 };
 
-const findOwned = async (userId: string, id: string) => {
+const findOwned = async (ctx: WorkspaceContext, id: string) => {
   assertObjectId(id);
-  const integration = await NotificationIntegration.findOne({ _id: id, userId });
+  const integration = await NotificationIntegration.findOne({
+    _id: id,
+    workspaceId: new Types.ObjectId(ctx.workspaceId),
+  });
   if (!integration) throw createApiError("Integration not found.", 404, "INTEGRATION_NOT_FOUND");
   return integration;
 };
 
 export const updateIntegration = async (
-  userId: string,
+  ctx: WorkspaceContext,
   id: string,
   patch: {
     name?: string;
@@ -206,7 +219,7 @@ export const updateIntegration = async (
     url?: string;
   },
 ) => {
-  const integration = await findOwned(userId, id);
+  const integration = await findOwned(ctx, id);
   const set: Record<string, unknown> = {};
   if (patch.name !== undefined) set.name = patch.name;
   if (patch.enabled !== undefined) set.enabled = patch.enabled;
@@ -234,11 +247,11 @@ export const updateIntegration = async (
       await validateWebhookUrl(replacement);
       set.urlHint = maskWebhookUrl(replacement);
     }
-    set.encryptedUrl = encryptSecret(replacement, `${userId}:${id}:url`);
+    set.encryptedUrl = encryptSecret(replacement, `${String(integration.userId)}:${id}:url`);
   }
 
   const updated = await NotificationIntegration.findOneAndUpdate(
-    { _id: id, userId },
+    { _id: id, workspaceId: new Types.ObjectId(ctx.workspaceId) },
     { $set: set },
     { new: true },
   );
@@ -246,8 +259,8 @@ export const updateIntegration = async (
   return { integration: toIntegrationView(updated, await loadLastDelivery(updated._id)) };
 };
 
-export const rotateSigningSecret = async (userId: string, id: string) => {
-  const integration = await findOwned(userId, id);
+export const rotateSigningSecret = async (ctx: WorkspaceContext, id: string) => {
+  const integration = await findOwned(ctx, id);
   if (integration.type !== "webhook") {
     throw createApiError(
       "Only webhook integrations have a signing secret.",
@@ -258,21 +271,32 @@ export const rotateSigningSecret = async (userId: string, id: string) => {
   requireConfigured();
   const signingSecret = generateSigningSecret();
   const updated = await NotificationIntegration.findOneAndUpdate(
-    { _id: id, userId },
-    { $set: { encryptedSigningSecret: encryptSecret(signingSecret, `${userId}:${id}:secret`) } },
+    { _id: id, workspaceId: new Types.ObjectId(ctx.workspaceId) },
+    {
+      $set: {
+        encryptedSigningSecret: encryptSecret(
+          signingSecret,
+          `${String(integration.userId)}:${id}:secret`,
+        ),
+      },
+    },
     { new: true },
   );
   if (!updated) throw createApiError("Integration not found.", 404, "INTEGRATION_NOT_FOUND");
   return { integration: toIntegrationView(updated), signingSecret };
 };
 
-export const deleteIntegration = async (userId: string, id: string) => {
-  await findOwned(userId, id);
-  await NotificationIntegration.deleteOne({ _id: id, userId });
+export const deleteIntegration = async (ctx: WorkspaceContext, id: string) => {
+  await findOwned(ctx, id);
+  await NotificationIntegration.deleteOne({
+    _id: id,
+    workspaceId: new Types.ObjectId(ctx.workspaceId),
+  });
   return { status: "ok" as const };
 };
 
 const runTestDelivery = async (input: {
+  workspaceId: string;
   userId: string;
   channel: "email" | "slack" | "webhook";
   integration?: INotificationIntegration;
@@ -284,6 +308,7 @@ const runTestDelivery = async (input: {
     kind: "test",
     eventId,
     eventType: testEventType,
+    workspaceId: new Types.ObjectId(input.workspaceId),
     userId: input.userId,
     channel: input.channel,
     integrationId: input.integration?._id,
@@ -300,10 +325,14 @@ const runTestDelivery = async (input: {
   return { delivery: toDeliverySummary(finished) };
 };
 
-const enforceTestCooldown = async (userId: string, target: string) => {
+const enforceTestCooldown = async (ctx: WorkspaceContext, target: string) => {
   let allowed = true;
   try {
-    allowed = await acquireLock(`cooldown:notification-test:${userId}:${target}`, "1", 10_000);
+    allowed = await acquireLock(
+      `cooldown:notification-test:${ctx.workspaceId}:${ctx.userId}:${target}`,
+      "1",
+      10_000,
+    );
   } catch {
     allowed = true;
   }
@@ -316,8 +345,8 @@ const enforceTestCooldown = async (userId: string, target: string) => {
   }
 };
 
-export const testIntegration = async (userId: string, id: string) => {
-  const integration = await findOwned(userId, id);
+export const testIntegration = async (ctx: WorkspaceContext, id: string) => {
+  const integration = await findOwned(ctx, id);
   if (!integration.enabled) {
     throw createApiError(
       "Enable this integration before sending a test notification.",
@@ -326,12 +355,17 @@ export const testIntegration = async (userId: string, id: string) => {
     );
   }
   requireConfigured();
-  await enforceTestCooldown(userId, id);
-  return runTestDelivery({ userId, channel: integration.type, integration });
+  await enforceTestCooldown(ctx, id);
+  return runTestDelivery({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    channel: integration.type,
+    integration,
+  });
 };
 
-export const testEmail = async (userId: string) => {
-  const user = await User.findById(userId).select("emailVerifiedAt").lean();
+export const testEmail = async (ctx: WorkspaceContext) => {
+  const user = await User.findById(ctx.userId).select("emailVerifiedAt").lean();
   if (!user?.emailVerifiedAt) {
     throw createApiError(
       "Verify your email address before sending test notifications.",
@@ -339,6 +373,6 @@ export const testEmail = async (userId: string) => {
       "EMAIL_NOT_VERIFIED",
     );
   }
-  await enforceTestCooldown(userId, "email");
-  return runTestDelivery({ userId, channel: "email" });
+  await enforceTestCooldown(ctx, "email");
+  return runTestDelivery({ workspaceId: ctx.workspaceId, userId: ctx.userId, channel: "email" });
 };

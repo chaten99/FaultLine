@@ -9,6 +9,8 @@
     "build": "tsc -p tsconfig.json && node ../scripts/copy-email-templates.mjs",
     "start": "node dist/src/server.js",
     "start:worker": "node dist/src/worker.js",
+    "migrate:workspaces": "tsx src/scripts/migrate-workspaces.ts",
+    "migrate:workspaces:prod": "node dist/src/scripts/migrate-workspaces.js",
     "lint": "eslint src tests",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --config vitest.config.ts"

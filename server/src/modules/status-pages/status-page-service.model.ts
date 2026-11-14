@@ -3,6 +3,7 @@ import { Schema, model, type Types } from "mongoose";
 export interface IStatusPageService {
   _id: Types.ObjectId;
   pageId: Types.ObjectId;
+  workspaceId: Types.ObjectId;
   ownerId: Types.ObjectId;
   name: string;
   description: string;
@@ -16,6 +17,7 @@ export interface IStatusPageService {
 const serviceSchema = new Schema<IStatusPageService>(
   {
     pageId: { type: Schema.Types.ObjectId, ref: "PublicStatusPage", required: true },
+    workspaceId: { type: Schema.Types.ObjectId, ref: "Workspace", required: true },
     ownerId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     name: { type: String, required: true, trim: true, maxlength: 80 },
     description: { type: String, trim: true, maxlength: 280, default: "" },
@@ -27,6 +29,6 @@ const serviceSchema = new Schema<IStatusPageService>(
 );
 
 serviceSchema.index({ pageId: 1, order: 1 });
-serviceSchema.index({ ownerId: 1, monitorIds: 1 });
+serviceSchema.index({ workspaceId: 1, monitorIds: 1 });
 
 export const StatusPageService = model<IStatusPageService>("StatusPageService", serviceSchema);

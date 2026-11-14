@@ -12,6 +12,8 @@ import { useIncidentSocket } from "../realtime/use-incident-socket";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SpinnerCustom } from "@/components/common/loading-spinner";
+import { ReadOnlyBadge } from "@/features/workspaces/components/read-only-badge";
+import { useCan } from "@/features/workspaces/hooks/use-workspaces";
 
 const formatDuration = (ms?: number) => {
   if (ms === undefined || ms === null) return "Ongoing";
@@ -37,6 +39,7 @@ const formatDate = (dateString?: string) => {
 
 export function IncidentDetailsPage() {
   const { id } = useParams<{ id: string }>();
+  const canAcknowledge = useCan("incidents:acknowledge");
   const [resolveDialogOpen, setResolveDialogOpen] = useState(false);
 
   useIncidentSocket(id);
@@ -142,31 +145,36 @@ export function IncidentDetailsPage() {
               )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              {incident.status === "open" && (
-                <Button
-                  variant="outline"
-                  onClick={handleAcknowledge}
-                  disabled={acknowledgeMutation.isPending}
-                >
-                  {acknowledgeMutation.isPending ? (
-                    <SpinnerCustom>Acknowledging…</SpinnerCustom>
-                  ) : (
-                    <>
-                      <Clock className="mr-1.5 size-4" />
-                      Acknowledge
-                    </>
-                  )}
-                </Button>
-              )}
+            {!canAcknowledge && (
+              <ReadOnlyBadge reason="Viewers can't acknowledge or resolve incidents." />
+            )}
+            {canAcknowledge && (
+              <div className="flex flex-wrap items-center gap-2">
+                {incident.status === "open" && (
+                  <Button
+                    variant="outline"
+                    onClick={handleAcknowledge}
+                    disabled={acknowledgeMutation.isPending}
+                  >
+                    {acknowledgeMutation.isPending ? (
+                      <SpinnerCustom>Acknowledging…</SpinnerCustom>
+                    ) : (
+                      <>
+                        <Clock className="mr-1.5 size-4" />
+                        Acknowledge
+                      </>
+                    )}
+                  </Button>
+                )}
 
-              {incident.status !== "resolved" && (
-                <Button onClick={() => setResolveDialogOpen(true)}>
-                  <CheckCircle2 className="mr-1.5 size-4" />
-                  Resolve incident
-                </Button>
-              )}
-            </div>
+                {incident.status !== "resolved" && (
+                  <Button onClick={() => setResolveDialogOpen(true)}>
+                    <CheckCircle2 className="mr-1.5 size-4" />
+                    Resolve incident
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

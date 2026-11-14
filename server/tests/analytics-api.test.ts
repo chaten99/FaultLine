@@ -6,6 +6,12 @@ import { createAccessToken } from "../src/modules/auth/auth-token.service.js";
 import { Monitor } from "../src/modules/monitors/monitor.model.js";
 import * as repository from "../src/modules/analytics/analytics.repository.js";
 import { bindMemoryModel } from "./helpers/memory-model.js";
+import {
+  bindWorkspaceModels,
+  resetWorkspaceModels,
+  seedWorkspace,
+  workspaceHeaders,
+} from "./helpers/workspace-fixtures.js";
 
 vi.mock("../src/lib/redis/redis.service.js", () => ({
   acquireLock: vi.fn().mockResolvedValue(true),
@@ -36,12 +42,17 @@ vi.mock("../src/modules/analytics/analytics.repository.js", () => ({
 
 const repo = vi.mocked(repository);
 const monitors = bindMemoryModel(Monitor);
+const workspaceStores = bindWorkspaceModels();
 
 const userA = new Types.ObjectId();
 const userB = new Types.ObjectId();
+const userViewer = new Types.ObjectId();
+const wsA = new Types.ObjectId();
+const wsB = new Types.ObjectId();
 const tokenA = createAccessToken(String(userA));
 const tokenB = createAccessToken(String(userB));
-const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
+const tokenViewer = createAccessToken(String(userViewer));
+const auth = (token: string) => workspaceHeaders(token, token === tokenB ? wsB : wsA);
 
 const createdAt = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
 const ids = {
@@ -54,6 +65,7 @@ const ids = {
 const addMonitor = (id: Types.ObjectId, userId: Types.ObjectId, name: string, extra = {}) => {
   monitors.docs.push({
     _id: id,
+    workspaceId: userId === userB ? wsB : wsA,
     userId,
     name,
     url: `https://user:pw@api.example.com/${name.toLowerCase()}?token=SECRET_${name}`,
@@ -75,7 +87,7 @@ const setupRepository = (incidents: repository.IncidentRecord[] = []) => {
       ]),
     );
   });
-  repo.loadCheckStats.mockImplementation(async (_user, monitorIds, from, to) =>
+  repo.loadCheckStats.mockImplementation(async (monitorIds, from, to) =>
     monitorIds.map((id) => ({
       monitorId: id,
       total: id === String(ids.beta) ? 50 : 100,
@@ -86,10 +98,10 @@ const setupRepository = (incidents: repository.IncidentRecord[] = []) => {
   );
   repo.loadCheckGaps.mockResolvedValue(new Map());
   repo.countChecksInSegments.mockImplementation(
-    async (_user, segments) => new Map(segments.map((entry) => [entry.monitorId, 100])),
+    async (segments) => new Map(segments.map((entry) => [entry.monitorId, 100])),
   );
   repo.loadLatencyByMonitor.mockImplementation(
-    async (_user, monitorIds) =>
+    async (monitorIds) =>
       new Map(
         monitorIds.map((id) => [
           id,
@@ -105,7 +117,7 @@ const setupRepository = (incidents: repository.IncidentRecord[] = []) => {
         ]),
       ),
   );
-  repo.loadLatencyByBucket.mockImplementation(async (_user, _ids, from, _to, bucketMs) => {
+  repo.loadLatencyByBucket.mockImplementation(async (_ids, from, _to, bucketMs) => {
     const start = Math.floor(from.getTime() / bucketMs) * bucketMs + bucketMs;
     return new Map([
       [start, [{ value: 120, count: 4, sum: 480, min: 100, max: 140 }]],
@@ -119,6 +131,13 @@ const setupRepository = (incidents: repository.IncidentRecord[] = []) => {
 beforeEach(() => {
   monitors.reset();
   vi.clearAllMocks();
+  resetWorkspaceModels(workspaceStores);
+  seedWorkspace(workspaceStores, {
+    ownerId: userA,
+    id: wsA,
+    members: [{ userId: userViewer, role: "viewer" }],
+  });
+  seedWorkspace(workspaceStores, { ownerId: userB, id: wsB });
   addMonitor(ids.alpha, userA, "Alpha");
   addMonitor(ids.beta, userA, "Beta");
   addMonitor(ids.gamma, userA, "Gamma", { active: false });
@@ -201,9 +220,9 @@ describe("analytics ownership", () => {
       .set(auth(tokenA))
       .expect(200);
     expect(own.body.scope).toEqual({ monitorCount: 3, activeMonitorCount: 2 });
-    const queriedIds = repo.loadCheckStats.mock.calls.flatMap((call) => call[1]);
+    const queriedIds = repo.loadCheckStats.mock.calls.flatMap((call) => call[0]);
     expect(queriedIds).not.toContain(String(ids.other));
-    expect(repo.loadCheckStats.mock.calls.every((call) => call[0] === String(userA))).toBe(true);
+    expect(repo.loadIncidents.mock.calls.every((call) => call[0] === String(wsA))).toBe(true);
     vi.clearAllMocks();
     setupRepository();
     const other = await request(app)
@@ -211,7 +230,7 @@ describe("analytics ownership", () => {
       .set(auth(tokenB))
       .expect(200);
     expect(other.body.scope).toEqual({ monitorCount: 1, activeMonitorCount: 1 });
-    expect(new Set(repo.loadCheckStats.mock.calls.flatMap((call) => call[1]))).toEqual(
+    expect(new Set(repo.loadCheckStats.mock.calls.flatMap((call) => call[0]))).toEqual(
       new Set([String(ids.other)]),
     );
   });
@@ -236,7 +255,7 @@ describe("overview", () => {
   });
 
   it("omits comparison and previous data when the previous period has no checks", async () => {
-    repo.loadCheckStats.mockImplementation(async (_user, monitorIds, from, to) => {
+    repo.loadCheckStats.mockImplementation(async (monitorIds, from, to) => {
       const isCurrent = to.getTime() > Date.now() - 120_000;
       return isCurrent
         ? monitorIds.map((id) => ({
@@ -523,5 +542,75 @@ describe("CSV export", () => {
       .set(auth(tokenA))
       .expect(400);
     await request(app).get("/api/analytics/export?type=overview").set(auth(tokenA)).expect(400);
+  });
+});
+
+describe("analytics workspace access", () => {
+  const as = (token: string, workspace: Types.ObjectId = wsA) => workspaceHeaders(token, workspace);
+
+  it("lets viewers read every analytics endpoint and export", async () => {
+    const paths = [
+      "/api/analytics/overview?range=24h",
+      "/api/analytics/response-times?range=24h",
+      "/api/analytics/availability?range=24h",
+      "/api/analytics/monitors?range=24h",
+      "/api/analytics/incidents?range=24h",
+      "/api/analytics/export?type=overview&range=24h",
+      `/api/analytics/monitors/${ids.alpha}?range=24h`,
+    ];
+    for (const path of paths) {
+      const response = await request(app).get(path).set(as(tokenViewer));
+      expect(response.status, path).toBe(200);
+    }
+  });
+
+  it("shows teammates the same workspace monitors and nothing from other workspaces", async () => {
+    const viewer = await request(app)
+      .get("/api/analytics/overview?range=24h")
+      .set(as(tokenViewer))
+      .expect(200);
+    const owner = await request(app)
+      .get("/api/analytics/overview?range=24h")
+      .set(as(tokenA))
+      .expect(200);
+    expect(viewer.body.scope).toEqual(owner.body.scope);
+    expect(viewer.body.scope).toEqual({ monitorCount: 3, activeMonitorCount: 2 });
+    const table = await request(app)
+      .get("/api/analytics/monitors?range=24h&pageSize=50")
+      .set(as(tokenViewer))
+      .expect(200);
+    expect(table.body.items.map((item: { name: string }) => item.name).sort()).toEqual([
+      "Alpha",
+      "Beta",
+      "Gamma",
+    ]);
+  });
+
+  it("rejects non-members and monitors from other workspaces", async () => {
+    const outsider = await request(app)
+      .get("/api/analytics/overview?range=24h")
+      .set(as(tokenB, wsA));
+    expect(outsider.status).toBe(404);
+    expect(outsider.body.code).toBe("WORKSPACE_NOT_FOUND");
+    expect(repo.loadCheckStats).not.toHaveBeenCalled();
+    await request(app)
+      .get(`/api/analytics/monitors/${ids.alpha}?range=24h`)
+      .set(as(tokenB, wsB))
+      .expect(404);
+    await request(app)
+      .get(`/api/analytics/overview?range=24h&monitorId=${ids.alpha}`)
+      .set(as(tokenB, wsB))
+      .expect(404);
+  });
+
+  it("stops serving analytics when the workspace is deleted or the member removed", async () => {
+    const membership = workspaceStores.members.docs.find(
+      (doc) => String(doc.userId) === String(userViewer),
+    )!;
+    membership.status = "removed";
+    await request(app).get("/api/analytics/overview?range=24h").set(as(tokenViewer)).expect(404);
+    workspaceStores.workspaces.docs.find((doc) => String(doc._id) === String(wsA))!.status =
+      "deleted";
+    await request(app).get("/api/analytics/overview?range=24h").set(as(tokenA)).expect(404);
   });
 });

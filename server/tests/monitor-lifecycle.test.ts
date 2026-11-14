@@ -8,6 +8,7 @@ import {
   recordMonitorActiveChange,
   recordMonitorCreated,
 } from "../src/modules/monitors/monitor-lifecycle.service.js";
+import { publishPublicStatusForMonitor } from "../src/modules/status-pages/status-page-realtime.service.js";
 import { bindMemoryModel } from "./helpers/memory-model.js";
 
 vi.mock("../src/modules/status-pages/status-page-realtime.service.js", () => ({
@@ -17,12 +18,15 @@ vi.mock("../src/modules/status-pages/status-page-realtime.service.js", () => ({
 const monitors = bindMemoryModel(Monitor);
 const events = bindMemoryModel(MonitorLifecycleEvent);
 const userId = new Types.ObjectId();
+const workspaceId = new Types.ObjectId();
+const otherWorkspaceId = new Types.ObjectId();
 
-const addMonitor = (active = true) => {
+const addMonitor = (active = true, workspace = workspaceId) => {
   const _id = new Types.ObjectId();
   monitors.docs.push({
     _id,
     userId,
+    workspaceId: workspace,
     active,
     createdAt: new Date("2026-01-01T00:00:00Z"),
     updatedAt: new Date(),
@@ -75,14 +79,45 @@ describe("monitor lifecycle history", () => {
       at: new Date("2026-01-01T00:00:00Z"),
     });
     const now = new Date("2026-02-01T00:00:00Z");
-    expect(await ensureLifecycleBaselines(String(userId), now)).toBe(1);
-    expect(await ensureLifecycleBaselines(String(userId), now)).toBe(0);
+    expect(await ensureLifecycleBaselines(String(workspaceId), now)).toBe(1);
+    expect(await ensureLifecycleBaselines(String(workspaceId), now)).toBe(0);
     const baseline = events.docs.find((event) => String(event.monitorId) === String(legacy));
     expect(baseline).toMatchObject({ type: "tracking_started", active: false });
     expect((baseline?.at as Date).toISOString()).toBe(now.toISOString());
     expect(events.docs.filter((event) => String(event.monitorId) === String(tracked))).toHaveLength(
       1,
     );
+  });
+
+  it("scopes baselines to the requested workspace and covers all workspaces when omitted", async () => {
+    const inWorkspace = addMonitor(true, workspaceId);
+    const elsewhere = addMonitor(true, otherWorkspaceId);
+    const now = new Date("2026-02-01T00:00:00Z");
+
+    expect(await ensureLifecycleBaselines(String(workspaceId), now)).toBe(1);
+    const ids = events.docs.map((event) => String(event.monitorId));
+    expect(ids).toEqual([String(inWorkspace)]);
+    expect(ids).not.toContain(String(elsewhere));
+
+    expect(await ensureLifecycleBaselines(undefined, now)).toBe(1);
+    expect(events.docs.map((event) => String(event.monitorId)).sort()).toEqual(
+      [String(inWorkspace), String(elsewhere)].sort(),
+    );
+  });
+
+  it("refreshes the public status of the monitor's workspace when it is paused or resumed", async () => {
+    const _id = addMonitor();
+    vi.mocked(publishPublicStatusForMonitor).mockClear();
+    await recordMonitorActiveChange(
+      { _id, userId, workspaceId, active: false },
+      true,
+      new Date("2026-01-02T00:00:00Z"),
+    );
+    expect(publishPublicStatusForMonitor).toHaveBeenCalledWith(String(workspaceId), String(_id));
+
+    vi.mocked(publishPublicStatusForMonitor).mockClear();
+    await recordMonitorActiveChange({ _id, userId, workspaceId, active: false }, false);
+    expect(publishPublicStatusForMonitor).not.toHaveBeenCalled();
   });
 
   it("deletes only the given monitor's history", async () => {

@@ -22,6 +22,7 @@ vi.mock("../src/lib/redis/redis.service.js", () => ({
 
 describe("Incident Detection Engine Unit Tests", () => {
   const userId = new mongoose.Types.ObjectId().toString();
+  const workspaceId = new mongoose.Types.ObjectId().toString();
   const monitorId = new mongoose.Types.ObjectId().toString();
 
   let monitorDoc: Record<string, unknown>;
@@ -36,6 +37,7 @@ describe("Incident Detection Engine Unit Tests", () => {
     monitorDoc = {
       _id: monitorId,
       userId,
+      workspaceId,
       name: "Checkout API",
       url: "https://api.example.com/checkout",
       failureThreshold: 3,
@@ -216,12 +218,92 @@ describe("Incident Detection Engine Unit Tests", () => {
     expect(redisService.publishDomainEvent).toHaveBeenCalledWith(
       "incident.created",
       expect.objectContaining({
-        userId,
+        workspaceId,
         payload: expect.objectContaining({
           incidentId: String(incident._id),
           status: "open",
         }),
       }),
+    );
+    const published = vi
+      .mocked(redisService.publishDomainEvent)
+      .mock.calls.find(([type]) => type === "incident.created");
+    expect(published?.[1]).not.toHaveProperty("userId");
+    expect(incident.workspaceId).toBe(workspaceId);
+    expect(incident.userId).toBe(userId);
+  });
+
+  it("carries the monitor's workspace onto incidents and every lifecycle event", async () => {
+    monitorDoc.consecutiveFailures = 2;
+    await evaluateCheckForIncident(monitorId, {
+      runId: "ws-trigger",
+      success: false,
+      failureCategory: "UNEXPECTED_STATUS",
+      statusCode: 500,
+      completedAt: new Date(Date.now() - 20000),
+    });
+    expect(incidentsStore).toHaveLength(1);
+    expect(String(incidentsStore[0]?.workspaceId)).toBe(workspaceId);
+
+    await evaluateCheckForIncident(monitorId, {
+      runId: "ws-fail-more",
+      success: false,
+      failureCategory: "UNEXPECTED_STATUS",
+      statusCode: 500,
+      completedAt: new Date(Date.now() - 10000),
+    });
+    await evaluateCheckForIncident(monitorId, {
+      runId: "ws-rec-1",
+      success: true,
+      statusCode: 200,
+      completedAt: new Date(Date.now() - 5000),
+    });
+    await evaluateCheckForIncident(monitorId, {
+      runId: "ws-rec-2",
+      success: true,
+      statusCode: 200,
+      completedAt: new Date(),
+    });
+
+    const calls = vi.mocked(redisService.publishDomainEvent).mock.calls;
+    const types = calls.map(([type]) => type);
+    expect(types).toEqual(
+      expect.arrayContaining([
+        "incident.created",
+        "incident.updated",
+        "incident.recovery_progress",
+        "incident.resolved",
+      ]),
+    );
+    for (const [, payload] of calls) {
+      expect(payload).toMatchObject({ workspaceId });
+      expect(payload).not.toHaveProperty("userId");
+    }
+    expect(incidentsStore[0]?.status).toBe("resolved");
+    expect(recordIncidentNotificationEvent).toHaveBeenCalledWith(
+      "incident.resolved",
+      String(incidentsStore[0]?._id),
+    );
+  });
+
+  it("keeps incidents of different workspaces independent", async () => {
+    const otherWorkspace = new mongoose.Types.ObjectId().toString();
+    monitorDoc.workspaceId = otherWorkspace;
+    monitorDoc.consecutiveFailures = 2;
+    await evaluateCheckForIncident(monitorId, {
+      runId: "other-ws",
+      success: false,
+      failureCategory: "TIMEOUT",
+      completedAt: new Date(),
+    });
+    expect(String(incidentsStore[0]?.workspaceId)).toBe(otherWorkspace);
+    expect(redisService.publishDomainEvent).toHaveBeenCalledWith(
+      "incident.created",
+      expect.objectContaining({ workspaceId: otherWorkspace }),
+    );
+    expect(redisService.publishDomainEvent).not.toHaveBeenCalledWith(
+      "incident.created",
+      expect.objectContaining({ workspaceId }),
     );
   });
 

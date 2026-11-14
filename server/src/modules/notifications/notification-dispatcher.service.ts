@@ -4,7 +4,11 @@ import { User } from "../auth/user.model.js";
 import { NotificationDelivery, type INotificationDelivery } from "./notification-delivery.model.js";
 import { NotificationIntegration } from "./notification-integration.model.js";
 import { NotificationOutbox, type INotificationOutbox } from "./notification-outbox.model.js";
-import { isEventEnabled, loadPreferenceSettings } from "./notification-preferences.service.js";
+import {
+  isEventEnabled,
+  loadPreferenceSettingsForMembers,
+} from "./notification-preferences.service.js";
+import { listActiveMemberIds } from "../workspaces/workspace-core.service.js";
 import {
   deliveryRetentionDate,
   enqueueDelivery,
@@ -20,42 +24,52 @@ export const buildDeliveryKey = (
   eventId: string,
   channel: ChannelType,
   integrationId?: string,
-): string => `${eventId}|${channel}|${integrationId ?? "account"}`;
+  recipientId?: string,
+): string => `${eventId}|${channel}|${integrationId ?? recipientId ?? "account"}`;
 
 type DeliveryTarget = {
   channel: ChannelType;
+  userId?: Types.ObjectId;
   integrationId?: Types.ObjectId;
   integrationName?: string;
 };
 
 export const resolveDeliveryTargets = async (
-  userId: string,
+  workspaceId: string,
   eventType: IncidentEventType,
 ): Promise<DeliveryTarget[]> => {
-  const settings = await loadPreferenceSettings(userId);
-  if (!isEventEnabled(settings, eventType)) return [];
-
   const targets: DeliveryTarget[] = [];
-  if (settings.channels.email) {
-    const user = await User.findById(userId).select("emailVerifiedAt").lean();
-    if (user?.emailVerifiedAt) targets.push({ channel: "email" });
+  const memberIds = await listActiveMemberIds(workspaceId);
+  if (memberIds.length > 0) {
+    const [settings, users] = await Promise.all([
+      loadPreferenceSettingsForMembers(workspaceId, memberIds),
+      User.find({ _id: { $in: memberIds.map((id) => new Types.ObjectId(id)) } })
+        .select("emailVerifiedAt")
+        .lean(),
+    ]);
+    const verified = new Set(
+      users.filter((user) => user.emailVerifiedAt).map((user) => String(user._id)),
+    );
+    for (const memberId of memberIds) {
+      const memberSettings = settings.get(memberId);
+      if (!memberSettings || !isEventEnabled(memberSettings, eventType)) continue;
+      if (!memberSettings.channels.email || !verified.has(memberId)) continue;
+      targets.push({ channel: "email", userId: new Types.ObjectId(memberId) });
+    }
   }
 
-  const wantsIntegrations = settings.channels.slack || settings.channels.webhook;
-  if (wantsIntegrations) {
-    const integrations = await NotificationIntegration.find({
-      userId,
-      enabled: true,
-      events: eventType,
-    }).lean();
-    for (const integration of integrations) {
-      if (!settings.channels[integration.type]) continue;
-      targets.push({
-        channel: integration.type,
-        integrationId: integration._id,
-        integrationName: integration.name,
-      });
-    }
+  const integrations = await NotificationIntegration.find({
+    workspaceId: new Types.ObjectId(workspaceId),
+    enabled: true,
+    events: eventType,
+  }).lean();
+  for (const integration of integrations) {
+    targets.push({
+      channel: integration.type,
+      userId: integration.userId,
+      integrationId: integration._id,
+      integrationName: integration.name,
+    });
   }
   return targets;
 };
@@ -68,6 +82,7 @@ const ensureDelivery = async (
     outbox.eventId,
     target.channel,
     target.integrationId ? String(target.integrationId) : undefined,
+    target.userId ? String(target.userId) : undefined,
   );
   try {
     return await NotificationDelivery.create({
@@ -75,7 +90,8 @@ const ensureDelivery = async (
       kind: "incident",
       eventId: outbox.eventId,
       eventType: outbox.type,
-      userId: outbox.userId,
+      workspaceId: outbox.workspaceId,
+      userId: target.userId ?? outbox.userId,
       channel: target.channel,
       integrationId: target.integrationId,
       integrationName: target.integrationName,
@@ -98,19 +114,19 @@ const ensureDelivery = async (
 };
 
 export const dispatchOutboxEntry = async (outbox: INotificationOutbox): Promise<number> => {
-  const targets = await resolveDeliveryTargets(String(outbox.userId), outbox.type);
+  const targets = await resolveDeliveryTargets(String(outbox.workspaceId), outbox.type);
   let dispatched = 0;
   for (const target of targets) {
     const delivery = await ensureDelivery(outbox, target);
     if (delivery.status === "pending") {
       await enqueueDelivery(delivery);
-      await publishDeliveryUpdate(String(outbox.userId), String(delivery._id), "queued");
+      await publishDeliveryUpdate(String(outbox.workspaceId), String(delivery._id), "queued");
     }
     dispatched += 1;
   }
   dispatched += await dispatchSubscriberNotifications(outbox);
   await publishPublicIncidentUpdates({
-    ownerId: String(outbox.userId),
+    workspaceId: String(outbox.workspaceId),
     monitorId: outbox.snapshot.monitorId,
     incidentId: outbox.snapshot.incidentId,
     eventType: outbox.type,

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useWorkspaceStore } from "@/features/workspaces/store/workspace.store";
 import type { User } from "../types/auth.types";
 
 type AuthState = {
@@ -18,5 +19,9 @@ export const useAuthStore = create<AuthState>((set) => ({
   setSession: (user, accessToken) => set({ user, accessToken, status: "authenticated" }),
   setAccessToken: (accessToken) => set({ accessToken }),
   updateUser: (patch) => set((state) => (state.user ? { user: { ...state.user, ...patch } } : {})),
-  clearSession: () => set({ user: null, accessToken: null, status: "unauthenticated" }),
+  clearSession: () => {
+    useWorkspaceStore.getState().setActiveWorkspace(null);
+    useWorkspaceStore.getState().reset();
+    set({ user: null, accessToken: null, status: "unauthenticated" });
+  },
 }));

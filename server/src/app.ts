@@ -12,6 +12,7 @@ import { incidentRouter } from "./modules/incidents/incident.routes.js";
 import { analyticsRouter } from "./modules/analytics/analytics.routes.js";
 import { publicStatusRouter } from "./modules/status-pages/status-page-public.routes.js";
 import { statusPageRouter } from "./modules/status-pages/status-page.routes.js";
+import { invitationRouter, workspaceRouter } from "./modules/workspaces/workspace.routes.js";
 import { profileRouter } from "./modules/profile/profile.routes.js";
 import { notificationRouter } from "./modules/notifications/notification.routes.js";
 
@@ -26,7 +27,13 @@ app.use(
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-CSRF-Token", "X-Request-ID"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-CSRF-Token",
+      "X-Request-ID",
+      "X-Workspace-Id",
+    ],
     exposedHeaders: ["Content-Disposition"],
   }),
 );
@@ -40,6 +47,8 @@ app.use("/api/monitors", monitorRouter);
 app.use("/api/incidents", incidentRouter);
 app.use("/api/notifications", notificationRouter);
 app.use("/api/profile", profileRouter);
+app.use("/api/workspaces", workspaceRouter);
+app.use("/api/invitations", invitationRouter);
 app.use("/api/analytics", analyticsRouter);
 app.use("/api/status-pages", statusPageRouter);
 app.use("/api/public/status-pages", publicStatusRouter);

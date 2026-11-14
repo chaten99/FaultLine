@@ -13,17 +13,18 @@ import { logger } from "../../config/logger.js";
 import crypto from "node:crypto";
 import { env } from "../../config/env.js";
 import { publishDomainEvent } from "../../lib/redis/redis.service.js";
+import type { WorkspaceContext } from "../workspaces/workspace.types.js";
 import {
   deleteMonitorLifecycle,
   recordMonitorActiveChange,
   recordMonitorCreated,
 } from "./monitor-lifecycle.service.js";
 
-const ensureOwned = async (userId: string, monitorId: string) => {
+const ensureOwned = async (ctx: WorkspaceContext, monitorId: string) => {
   if (!Types.ObjectId.isValid(monitorId) || !/^[a-f\d]{24}$/i.test(monitorId)) {
     throw createApiError("Monitor not found.", 404, "MONITOR_NOT_FOUND");
   }
-  const monitor = await Monitor.findOne({ _id: monitorId, userId });
+  const monitor = await Monitor.findOne({ _id: monitorId, workspaceId: ctx.workspaceId });
   if (!monitor) throw createApiError("Monitor not found.", 404, "MONITOR_NOT_FOUND");
   return monitor;
 };
@@ -33,7 +34,7 @@ const validateUrlIfPresent = async (url: string | undefined) => {
 };
 
 export const listMonitors = async (
-  userId: string,
+  ctx: WorkspaceContext,
   page: number,
   pageSize: number,
   search?: string,
@@ -41,7 +42,7 @@ export const listMonitors = async (
   sortBy: "createdAt" | "name" | "intervalSeconds" | "url" = "createdAt",
   sortOrder: "asc" | "desc" = "desc",
 ) => {
-  const filter: Record<string, unknown> = { userId };
+  const filter: Record<string, unknown> = { workspaceId: ctx.workspaceId };
   if (status === "active") {
     filter.active = true;
   } else if (status === "paused") {
@@ -66,8 +67,8 @@ export const listMonitors = async (
       .limit(pageSize)
       .lean(),
     Monitor.countDocuments(filter),
-    Monitor.countDocuments({ userId, active: true }),
-    Monitor.countDocuments({ userId, active: false }),
+    Monitor.countDocuments({ workspaceId: ctx.workspaceId, active: true }),
+    Monitor.countDocuments({ workspaceId: ctx.workspaceId, active: false }),
   ]);
   return {
     items,
@@ -84,7 +85,7 @@ export const listMonitors = async (
 };
 
 export const createMonitor = async (
-  userId: string,
+  ctx: WorkspaceContext,
   input: { url: string; [key: string]: unknown },
 ) => {
   await validateMonitorUrl(input.url);
@@ -105,7 +106,11 @@ export const createMonitor = async (
       sanitized[field] = input[field];
     }
   }
-  const monitor = await Monitor.create({ ...sanitized, userId });
+  const monitor = await Monitor.create({
+    ...sanitized,
+    userId: ctx.userId,
+    workspaceId: ctx.workspaceId,
+  });
   await recordMonitorCreated(monitor);
 
   if (monitor.active) {
@@ -123,14 +128,14 @@ export const createMonitor = async (
   return monitor;
 };
 
-export const getMonitor = (userId: string, monitorId: string) => ensureOwned(userId, monitorId);
+export const getMonitor = (ctx: WorkspaceContext, monitorId: string) => ensureOwned(ctx, monitorId);
 
 export const updateMonitor = async (
-  userId: string,
+  ctx: WorkspaceContext,
   monitorId: string,
   input: { url?: string; version?: number; [key: string]: unknown },
 ) => {
-  const previous = await ensureOwned(userId, monitorId);
+  const previous = await ensureOwned(ctx, monitorId);
   await validateUrlIfPresent(input.url);
 
   const allowedFields = [
@@ -151,7 +156,7 @@ export const updateMonitor = async (
     }
   }
 
-  const query: Record<string, unknown> = { _id: monitorId, userId };
+  const query: Record<string, unknown> = { _id: monitorId, workspaceId: ctx.workspaceId };
   if (typeof input.version === "number") {
     query.__v = input.version;
   }
@@ -194,22 +199,22 @@ export const updateMonitor = async (
   return monitor;
 };
 
-export const deleteMonitor = async (userId: string, monitorId: string) => {
-  await ensureOwned(userId, monitorId);
-  const result = await Monitor.deleteOne({ _id: monitorId, userId });
+export const deleteMonitor = async (ctx: WorkspaceContext, monitorId: string) => {
+  await ensureOwned(ctx, monitorId);
+  const result = await Monitor.deleteOne({ _id: monitorId, workspaceId: ctx.workspaceId });
   if (!result.deletedCount) throw createApiError("Monitor not found.", 404, "MONITOR_NOT_FOUND");
 
   try {
     await unscheduleMonitor(monitorId);
-    await MonitorCheck.deleteMany({ monitorId, userId });
+    await MonitorCheck.deleteMany({ monitorId });
     await deleteMonitorLifecycle(monitorId);
   } catch (error) {
     logger.warn({ monitorId, err: error }, "Error cleaning up scheduler or checks after deletion");
   }
 };
 
-export const triggerManualCheck = async (userId: string, monitorId: string) => {
-  const monitor = await ensureOwned(userId, monitorId);
+export const triggerManualCheck = async (ctx: WorkspaceContext, monitorId: string) => {
+  const monitor = await ensureOwned(ctx, monitorId);
   if (!monitor.active) {
     throw createApiError(
       "Cannot run manual check on a paused monitor. Resume the monitor first.",
@@ -249,7 +254,7 @@ export const triggerManualCheck = async (userId: string, monitorId: string) => {
       $set: { lastCheckStatus: "queued", lastCheckId: runId },
     });
     await publishDomainEvent("monitor.check.queued", {
-      userId,
+      workspaceId: ctx.workspaceId,
       payload: { monitorId, runId, status: "queued", timestamp: new Date().toISOString() },
     });
 
@@ -270,15 +275,15 @@ export const triggerManualCheck = async (userId: string, monitorId: string) => {
 };
 
 export const listMonitorChecks = async (
-  userId: string,
+  ctx: WorkspaceContext,
   monitorId: string,
   page = 1,
   pageSize = 20,
   status?: string,
 ) => {
-  await ensureOwned(userId, monitorId);
+  await ensureOwned(ctx, monitorId);
 
-  const filter: Record<string, unknown> = { monitorId, userId };
+  const filter: Record<string, unknown> = { monitorId };
   if (status) {
     filter.status = status;
   }
@@ -301,11 +306,15 @@ export const listMonitorChecks = async (
   };
 };
 
-export const getMonitorCheck = async (userId: string, monitorId: string, checkId: string) => {
-  await ensureOwned(userId, monitorId);
+export const getMonitorCheck = async (
+  ctx: WorkspaceContext,
+  monitorId: string,
+  checkId: string,
+) => {
+  await ensureOwned(ctx, monitorId);
   const query = Types.ObjectId.isValid(checkId)
-    ? { $or: [{ _id: checkId }, { runId: checkId }], monitorId, userId }
-    : { runId: checkId, monitorId, userId };
+    ? { $or: [{ _id: checkId }, { runId: checkId }], monitorId }
+    : { runId: checkId, monitorId };
 
   const check = await MonitorCheck.findOne(query).lean();
   if (!check) {

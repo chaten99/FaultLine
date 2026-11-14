@@ -5,6 +5,7 @@ import {
   NotificationPreferences,
   defaultNotificationPreferences,
 } from "./notification-preferences.model.js";
+import type { WorkspaceContext } from "../workspaces/workspace.types.js";
 import type { IncidentEventType } from "./notification.types.js";
 
 export type PreferenceSettings = {
@@ -52,13 +53,38 @@ const eventKeys: Record<IncidentEventType, keyof PreferenceSettings["events"]> =
 export const isEventEnabled = (settings: PreferenceSettings, event: IncidentEventType): boolean =>
   settings.enabled && settings.events[eventKeys[event]];
 
-export const loadPreferenceSettings = async (userId: string): Promise<PreferenceSettings> =>
-  merge((await NotificationPreferences.findOne({ userId }).lean()) as StoredPreferences);
+export const loadPreferenceSettings = async (
+  workspaceId: string,
+  userId: string,
+): Promise<PreferenceSettings> =>
+  merge(
+    (await NotificationPreferences.findOne({
+      workspaceId: new Types.ObjectId(workspaceId),
+      userId: new Types.ObjectId(userId),
+    }).lean()) as StoredPreferences,
+  );
 
-export const getPreferencesView = async (userId: string) => {
+export const loadPreferenceSettingsForMembers = async (
+  workspaceId: string,
+  userIds: string[],
+): Promise<Map<string, PreferenceSettings>> => {
+  const rows = await NotificationPreferences.find({
+    workspaceId: new Types.ObjectId(workspaceId),
+    userId: { $in: userIds.map((id) => new Types.ObjectId(id)) },
+  }).lean();
+  const stored = new Map(
+    rows.map((row) => [String(row.userId), row as unknown as StoredPreferences]),
+  );
+  return new Map(userIds.map((id) => [id, merge(stored.get(id) ?? null)]));
+};
+
+export const getPreferencesView = async (ctx: WorkspaceContext) => {
   const [stored, user] = await Promise.all([
-    NotificationPreferences.findOne({ userId }).lean() as Promise<StoredPreferences>,
-    User.findById(userId).select("email emailVerifiedAt").lean(),
+    NotificationPreferences.findOne({
+      workspaceId: new Types.ObjectId(ctx.workspaceId),
+      userId: new Types.ObjectId(ctx.userId),
+    }).lean() as Promise<StoredPreferences>,
+    User.findById(ctx.userId).select("email emailVerifiedAt").lean(),
   ]);
   if (!user) throw createApiError("Authentication required.", 401, "AUTHENTICATION_REQUIRED");
   return {
@@ -68,7 +94,7 @@ export const getPreferencesView = async (userId: string) => {
   };
 };
 
-export const updatePreferences = async (userId: string, patch: PreferencePatch) => {
+export const updatePreferences = async (ctx: WorkspaceContext, patch: PreferencePatch) => {
   const set: Record<string, boolean> = {};
   if (patch.enabled !== undefined) set.enabled = patch.enabled;
   for (const [key, value] of Object.entries(patch.channels ?? {})) {
@@ -78,9 +104,9 @@ export const updatePreferences = async (userId: string, patch: PreferencePatch) 
     if (value !== undefined) set[`events.${key}`] = value;
   }
   await NotificationPreferences.findOneAndUpdate(
-    { userId: new Types.ObjectId(userId) },
+    { workspaceId: new Types.ObjectId(ctx.workspaceId), userId: new Types.ObjectId(ctx.userId) },
     { $set: set },
     { upsert: true, new: true },
   );
-  return getPreferencesView(userId);
+  return getPreferencesView(ctx);
 };

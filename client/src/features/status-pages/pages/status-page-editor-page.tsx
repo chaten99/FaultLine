@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, Navigate, useParams } from "react-router-dom";
+import { useCan } from "@/features/workspaces/hooks/use-workspaces";
 import { ArrowLeft, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { SpinnerCustom } from "@/components/common/loading-spinner";
@@ -22,6 +23,7 @@ export function StatusPageEditorPage() {
   const update = useUpdateStatusPage();
   const publish = usePublishToggle();
   const data = page.data;
+  const canManage = useCan("status_pages:manage");
 
   const initial = useMemo<Partial<StatusPageFormValues> | undefined>(
     () =>
@@ -36,6 +38,8 @@ export function StatusPageEditorPage() {
         : undefined,
     [data],
   );
+
+  if (!canManage) return <Navigate to={`/status-pages/${id}/preview`} replace />;
 
   const save = async (values: StatusPageFormValues) => {
     try {
