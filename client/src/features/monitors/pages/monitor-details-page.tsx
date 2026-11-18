@@ -60,6 +60,8 @@ import { MonitorAnalyticsPanel } from "@/features/analytics/components/monitor-a
 import { ReadOnlyBadge } from "@/features/workspaces/components/read-only-badge";
 import { useCan } from "@/features/workspaces/hooks/use-workspaces";
 
+import { MaintenanceBadge, ProtocolHistory } from "../components/protocol-history";
+
 export function MonitorDetailsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -324,6 +326,8 @@ export function MonitorDetailsPage() {
                   {monitor.name}
                 </h1>
                 <MonitorStatusBadge monitor={monitor} />
+                <Badge variant="outline">{monitor.type ?? "http"}</Badge>
+                <MaintenanceBadge monitorId={monitor._id} />
                 {monitor.active ? (
                   <Badge variant="outline" className="gap-1.5 border-foreground/30 text-foreground">
                     <span className="size-1.5 rounded-full bg-foreground" />
@@ -353,7 +357,7 @@ export function MonitorDetailsPage() {
                   <TooltipContent>Copy URL</TooltipContent>
                 </Tooltip>
                 <a
-                  href={monitor.url}
+                  href={monitor.url.startsWith("http") ? monitor.url : "https://" + monitor.url}
                   target="_blank"
                   rel="noreferrer noopener"
                   className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground focus:outline-none"
@@ -467,12 +471,20 @@ export function MonitorDetailsPage() {
             <article className="rounded-lg border border-border bg-card p-4 shadow-xs">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <ShieldCheck className="size-4" />
-                <span className="text-xs font-medium">Expected status</span>
+                <span className="text-xs font-medium">
+                  {(monitor.type ?? "http") === "http" ? "Expected status" : "Monitor type"}
+                </span>
               </div>
               <p className="mt-2 text-xl font-mono font-semibold text-foreground">
-                {formatStatusCodes(monitor.expectedStatusCodes)}
+                {(monitor.type ?? "http") === "http"
+                  ? formatStatusCodes(monitor.expectedStatusCodes)
+                  : monitor.type?.toUpperCase()}
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">Healthy HTTP response codes</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {(monitor.type ?? "http") === "http"
+                  ? "Healthy HTTP response codes"
+                  : "Protocol-specific validation"}
+              </p>
             </article>
           </div>
 
@@ -482,7 +494,9 @@ export function MonitorDetailsPage() {
                 <Zap className="size-4 mt-0.5 text-muted-foreground shrink-0" />
                 <div>
                   <span className="text-xs font-medium text-muted-foreground">
-                    Last response duration
+                    {(monitor.type ?? "http") === "http"
+                      ? "Last response duration"
+                      : "Last check duration"}
                   </span>
                   <p className="mt-0.5 text-sm font-semibold text-foreground">
                     {typeof monitor.lastResponseDurationMs === "number"
@@ -568,7 +582,9 @@ export function MonitorDetailsPage() {
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
                       <TableHead className="w-[12%]">Result</TableHead>
-                      <TableHead className="w-[14%]">HTTP response</TableHead>
+                      <TableHead className="w-[14%]">
+                        {(monitor.type ?? "http") === "http" ? "HTTP response" : "Protocol result"}
+                      </TableHead>
                       <TableHead className="w-[12%]">Duration</TableHead>
                       <TableHead className="w-[38%]">What happened</TableHead>
                       <TableHead className="w-[14%]">Executed</TableHead>
@@ -587,7 +603,10 @@ export function MonitorDetailsPage() {
                             setCheckDetailsOpen(true);
                           }}
                         >
-                          <TableCell>{renderCheckStatusBadge(check)}</TableCell>
+                          <TableCell>
+                            {renderCheckStatusBadge(check)}
+                            {check.underMaintenance && <Badge variant="outline">Maintenance</Badge>}
+                          </TableCell>
 
                           <TableCell>
                             {typeof check.statusCode === "number" ? (
@@ -688,7 +707,11 @@ export function MonitorDetailsPage() {
           )}
         </section>
 
-        <MonitorAnalyticsPanel monitorId={monitor._id} />
+        {(monitor.type ?? "http") === "http" ? (
+          <MonitorAnalyticsPanel monitorId={monitor._id} />
+        ) : (
+          <ProtocolHistory monitorId={monitor._id} />
+        )}
       </div>
 
       <EditMonitorDialog

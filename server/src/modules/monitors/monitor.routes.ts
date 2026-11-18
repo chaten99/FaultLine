@@ -11,9 +11,24 @@ import {
   update,
 } from "./monitor.controller.js";
 
+import { workspaceOf } from "../workspaces/workspace-context.js";
+import { getMonitor } from "./monitor.service.js";
+import { MonitorCheck } from "../checks/monitor-check.model.js";
+import { monitorIdSchema } from "./monitor.validation.js";
+
 export const monitorRouter = Router();
 monitorRouter.get("/", ...withWorkspace("monitors:view"), list);
 monitorRouter.post("/", ...withWorkspace("monitors:write"), create);
+monitorRouter.get("/:id/protocol-history", ...withWorkspace("monitors:view"), async (req, res) => {
+  const { id } = monitorIdSchema.parse(req.params);
+  await getMonitor(workspaceOf(req), id);
+  return res.json({
+    items: await MonitorCheck.find({ monitorId: id, completedAt: { $exists: true } })
+      .sort({ completedAt: -1 })
+      .limit(200)
+      .lean(),
+  });
+});
 monitorRouter.get("/:id", ...withWorkspace("monitors:view"), get);
 monitorRouter.patch("/:id", ...withWorkspace("monitors:write"), update);
 monitorRouter.delete("/:id", ...withWorkspace("monitors:write"), remove);

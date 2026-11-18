@@ -7,6 +7,14 @@ import * as redisService from "../src/lib/redis/redis.service.js";
 import * as executorService from "../src/modules/monitors/monitor-executor.service.js";
 import type { MonitorCheckJobData } from "../src/queues/monitor-check.queue.js";
 
+vi.mock("../src/modules/maintenance/maintenance.service.js", () => ({
+  matchingMaintenance: vi.fn().mockResolvedValue([]),
+}));
+vi.mock("../src/modules/maintenance/maintenance-notifications.service.js", () => ({
+  notifyAfterMaintenance: vi.fn().mockResolvedValue(undefined),
+  markIncidentDuringMaintenance: vi.fn().mockResolvedValue(undefined),
+}));
+
 describe("Monitor Check Worker", () => {
   const mockJob = {
     id: "job-1",

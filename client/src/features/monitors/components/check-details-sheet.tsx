@@ -16,6 +16,8 @@ import { presentCheck } from "../lib/check-presentation";
 import type { Monitor, MonitorCheck } from "../api/monitors.api";
 import { cn } from "@/lib/utils";
 
+import { ProtocolDetailsView } from "./protocol-details";
+
 interface CheckDetailsSheetProps {
   check: MonitorCheck | null;
   monitor?: Monitor | null;
@@ -104,7 +106,11 @@ export function CheckDetailsSheet({ check, monitor, open, onOpenChange }: CheckD
         </SheetHeader>
 
         <div className="py-6 space-y-6">
-          {/* Overview Section */}
+          {check.underMaintenance && (
+            <Badge variant="outline">Under maintenance · real check result</Badge>
+          )}
+          <Badge variant="outline">{check.monitorType ?? "http"}</Badge>
+          <ProtocolDetailsView details={check.details} />
           <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div className="rounded-lg border border-border bg-card p-3 shadow-xs">
               <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
@@ -165,38 +171,40 @@ export function CheckDetailsSheet({ check, monitor, open, onOpenChange }: CheckD
             )}
           </section>
 
-          {/* Expected vs Actual Section */}
-          <section className="space-y-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Expected vs actual
-            </h3>
-            <div className="rounded-lg border border-border bg-card divide-y divide-border text-xs shadow-xs">
-              <div className="flex items-center justify-between p-3">
-                <span className="text-muted-foreground">HTTP status code</span>
-                <div className="flex items-center gap-3 font-mono">
-                  <span className="text-muted-foreground">
-                    Expected: [{presentation.expectedVsActual.expectedStatusCodes}]
-                  </span>
-                  <span className="font-semibold text-foreground">
-                    Actual: {presentation.expectedVsActual.actualStatusCode}
-                  </span>
-                </div>
-              </div>
+          {(check.monitorType ?? "http") === "http" && (
+            <>
+              <section className="space-y-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Expected vs actual
+                </h3>
+                <div className="rounded-lg border border-border bg-card divide-y divide-border text-xs shadow-xs">
+                  <div className="flex items-center justify-between p-3">
+                    <span className="text-muted-foreground">HTTP status code</span>
+                    <div className="flex items-center gap-3 font-mono">
+                      <span className="text-muted-foreground">
+                        Expected: [{presentation.expectedVsActual.expectedStatusCodes}]
+                      </span>
+                      <span className="font-semibold text-foreground">
+                        Actual: {presentation.expectedVsActual.actualStatusCode}
+                      </span>
+                    </div>
+                  </div>
 
-              <div className="flex items-center justify-between p-3">
-                <span className="text-muted-foreground">Response duration</span>
-                <div className="flex items-center gap-3 font-mono">
-                  <span className="text-muted-foreground">
-                    Timeout: {presentation.expectedVsActual.configuredTimeout}
-                  </span>
-                  <span className="font-semibold text-foreground">
-                    Actual: {presentation.expectedVsActual.actualDuration}
-                  </span>
+                  <div className="flex items-center justify-between p-3">
+                    <span className="text-muted-foreground">Response duration</span>
+                    <div className="flex items-center gap-3 font-mono">
+                      <span className="text-muted-foreground">
+                        Timeout: {presentation.expectedVsActual.configuredTimeout}
+                      </span>
+                      <span className="font-semibold text-foreground">
+                        Actual: {presentation.expectedVsActual.actualDuration}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-          </section>
-
+              </section>
+            </>
+          )}
           {/* Execution Information Section */}
           <section className="space-y-2">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">

@@ -32,6 +32,8 @@ import { AuditLogPage } from "@/features/workspaces/pages/audit-log-page";
 import { MembersPage } from "@/features/workspaces/pages/members-page";
 import { WorkspaceSettingsPage } from "@/features/workspaces/pages/workspace-settings-page";
 
+import { MaintenancePage } from "@/features/maintenance/maintenance-page";
+
 export default function App() {
   const [queryClient] = useState(
     () =>
@@ -123,6 +125,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <MonitorDetailsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/maintenance"
+            element={
+              <ProtectedRoute>
+                <MaintenancePage />
               </ProtectedRoute>
             }
           />

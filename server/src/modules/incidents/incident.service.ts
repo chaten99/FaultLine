@@ -8,7 +8,20 @@ import { logger } from "../../config/logger.js";
 import type { WorkspaceContext } from "../workspaces/workspace.types.js";
 import { recordIncidentNotificationEvent } from "../notifications/notification-outbox.service.js";
 
-export const QUALIFYING_FAILURES = ["UNEXPECTED_STATUS", "TIMEOUT", "NETWORK_ERROR", "DNS_FAILURE"];
+export const QUALIFYING_FAILURES = [
+  "UNEXPECTED_STATUS",
+  "TIMEOUT",
+  "NETWORK_ERROR",
+  "DNS_FAILURE",
+  "RESPONSE_ASSERTION_FAILED",
+  "TLS_INVALID",
+  "TLS_HOSTNAME_MISMATCH",
+  "TLS_HANDSHAKE_FAILED",
+  "TLS_EXPIRING",
+  "DNS_NXDOMAIN",
+  "DNS_UNEXPECTED_RECORDS",
+  "DOMAIN_EXPIRING",
+];
 
 export interface EvaluateCheckInput {
   runId: string;

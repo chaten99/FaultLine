@@ -176,6 +176,7 @@ describe("Monitor API Integration Tests", () => {
           updatedAt: new Date().toISOString(),
           ...(doc as Record<string, unknown>),
         } as MockMonitor;
+        item._id = String(item._id);
         store.push(item);
         return item;
       },

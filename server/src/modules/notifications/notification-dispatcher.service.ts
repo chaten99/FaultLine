@@ -18,6 +18,8 @@ import type { ChannelType, IncidentEventType } from "./notification.types.js";
 import { dispatchSubscriberNotifications } from "../status-pages/status-page-delivery.service.js";
 import { publishPublicIncidentUpdates } from "../status-pages/status-page-realtime.service.js";
 
+import { suppressForMaintenance } from "../maintenance/maintenance-notifications.service.js";
+
 const claimWindowMs = 60_000;
 
 export const buildDeliveryKey = (
@@ -114,6 +116,15 @@ const ensureDelivery = async (
 };
 
 export const dispatchOutboxEntry = async (outbox: INotificationOutbox): Promise<number> => {
+  if (await suppressForMaintenance(outbox)) {
+    await publishPublicIncidentUpdates({
+      workspaceId: String(outbox.workspaceId),
+      monitorId: outbox.snapshot.monitorId,
+      incidentId: outbox.snapshot.incidentId,
+      eventType: outbox.type,
+    });
+    return 0;
+  }
   const targets = await resolveDeliveryTargets(String(outbox.workspaceId), outbox.type);
   let dispatched = 0;
   for (const target of targets) {

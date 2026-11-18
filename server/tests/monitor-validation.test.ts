@@ -101,13 +101,13 @@ describe("monitor validation schemas", () => {
     ).toBe(false);
   });
 
-  it("rejects method other than GET", () => {
+  it("accepts POST and rejects unsupported HEAD", () => {
     expect(
       createMonitorSchema.safeParse({
         ...validCreatePayload,
         method: "POST",
       }).success,
-    ).toBe(false);
+    ).toBe(true);
 
     expect(
       createMonitorSchema.safeParse({
