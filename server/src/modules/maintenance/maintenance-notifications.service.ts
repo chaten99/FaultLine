@@ -1,3 +1,4 @@
+import { isObjectIdOrHexString } from "mongoose";
 import { matchingMaintenance, localTime } from "./maintenance.service.js";
 import {
   NotificationOutbox,
@@ -131,10 +132,16 @@ export const reconcileMaintenanceNotifications = async (): Promise<void> => {
     .limit(100)
     .lean();
   const scopes = new Map(
-    entries.map((entry) => [
-      String(entry.workspaceId) + ":" + entry.snapshot.monitorId,
-      { workspaceId: String(entry.workspaceId), monitorId: entry.snapshot.monitorId },
-    ]),
+    entries
+      .filter(
+        (entry) =>
+          isObjectIdOrHexString(entry.workspaceId) &&
+          isObjectIdOrHexString(entry.snapshot?.monitorId),
+      )
+      .map((entry) => [
+        String(entry.workspaceId) + ":" + entry.snapshot.monitorId,
+        { workspaceId: String(entry.workspaceId), monitorId: entry.snapshot.monitorId },
+      ]),
   );
   for (const scope of scopes.values())
     await notifyAfterMaintenance(scope.workspaceId, scope.monitorId);

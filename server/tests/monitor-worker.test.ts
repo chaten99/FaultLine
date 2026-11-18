@@ -1,11 +1,22 @@
 import { beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import type { Job } from "bullmq";
 import { processMonitorCheckJob } from "../src/workers/monitor-check.worker.js";
+import { unscheduleMonitor } from "../src/queues/monitor-scheduler.service.js";
+import { evaluateCheckForIncident } from "../src/modules/incidents/incident.service.js";
+import { matchingMaintenance } from "../src/modules/maintenance/maintenance.service.js";
 import { Monitor } from "../src/modules/monitors/monitor.model.js";
 import { MonitorCheck } from "../src/modules/checks/monitor-check.model.js";
 import * as redisService from "../src/lib/redis/redis.service.js";
 import * as executorService from "../src/modules/monitors/monitor-executor.service.js";
 import type { MonitorCheckJobData } from "../src/queues/monitor-check.queue.js";
+
+vi.mock("../src/modules/incidents/incident.service.js", () => ({
+  evaluateCheckForIncident: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("../src/queues/monitor-scheduler.service.js", () => ({
+  unscheduleMonitor: vi.fn().mockResolvedValue(undefined),
+}));
 
 vi.mock("../src/modules/maintenance/maintenance.service.js", () => ({
   matchingMaintenance: vi.fn().mockResolvedValue([]),
@@ -19,13 +30,81 @@ describe("Monitor Check Worker", () => {
   const mockJob = {
     id: "job-1",
     data: {
-      monitorId: "mon-123",
+      monitorId: "507f1f77bcf86cd799439123",
       manual: false,
     },
   } as unknown as Job<MonitorCheckJobData>;
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  it.each([undefined, null, "undefined", "not-an-object-id"])(
+    "ignores malformed queued monitor IDs (%s) before locks or database queries",
+    async (monitorId) => {
+      const find = vi.spyOn(Monitor, "findById");
+      const lock = vi.spyOn(redisService, "acquireLock");
+      await expect(
+        processMonitorCheckJob({ data: { monitorId } } as unknown as Job<MonitorCheckJobData>),
+      ).resolves.toBeUndefined();
+      expect(find).not.toHaveBeenCalled();
+      expect(lock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([undefined, null, "undefined", "not-an-object-id"])(
+    "unschedules unscoped monitors (%s) without executing or publishing",
+    async (workspaceId) => {
+      vi.spyOn(redisService, "acquireLock").mockResolvedValue(true);
+      const release = vi.spyOn(redisService, "releaseLock").mockResolvedValue(true);
+      const publish = vi.spyOn(redisService, "publishDomainEvent").mockResolvedValue(undefined);
+      vi.spyOn(Monitor, "findById").mockResolvedValue({
+        _id: mockJob.data.monitorId,
+        userId: "507f1f77bcf86cd799439011",
+        workspaceId,
+        active: true,
+      } as never);
+      const execute = vi.spyOn(executorService, "executeMonitorHttpCheck");
+      const persist = vi.spyOn(MonitorCheck, "findOneAndUpdate");
+      await expect(processMonitorCheckJob(mockJob)).resolves.toBeUndefined();
+      expect(unscheduleMonitor).toHaveBeenCalledWith(mockJob.data.monitorId);
+      expect(execute).not.toHaveBeenCalled();
+      expect(evaluateCheckForIncident).not.toHaveBeenCalled();
+      expect(matchingMaintenance).not.toHaveBeenCalled();
+      expect(persist).not.toHaveBeenCalled();
+      expect(publish).not.toHaveBeenCalled();
+      expect(release).toHaveBeenCalledWith(
+        "lock:monitor:" + mockJob.data.monitorId,
+        expect.any(String),
+      );
+    },
+  );
+
+  it("settles an already queued manual check as a non-health migration error", async () => {
+    vi.spyOn(redisService, "acquireLock").mockResolvedValue(true);
+    vi.spyOn(redisService, "releaseLock").mockResolvedValue(true);
+    vi.spyOn(Monitor, "findById").mockResolvedValue({
+      _id: mockJob.data.monitorId,
+      active: true,
+    } as never);
+    const persist = vi.spyOn(MonitorCheck, "findOneAndUpdate").mockResolvedValue(null);
+    const summary = vi.spyOn(Monitor, "findOneAndUpdate");
+    await expect(
+      processMonitorCheckJob({
+        ...mockJob,
+        data: { ...mockJob.data, manual: true, runId: "legacy-manual" },
+      } as Job<MonitorCheckJobData>),
+    ).resolves.toBeUndefined();
+    expect(persist).toHaveBeenCalledWith(
+      {
+        monitorId: mockJob.data.monitorId,
+        runId: "legacy-manual",
+        status: { $in: ["queued", "running"] },
+      },
+      { $set: expect.objectContaining({ status: "error", failureCategory: "WORKSPACE_REQUIRED" }) },
+    );
+    expect(summary).not.toHaveBeenCalled();
   });
 
   it("retries when distributed lock cannot be acquired", async () => {
@@ -43,15 +122,19 @@ describe("Monitor Check Worker", () => {
     vi.spyOn(redisService, "acquireLock").mockResolvedValue(true);
     const releaseSpy = vi.spyOn(redisService, "releaseLock").mockResolvedValue(true);
     vi.spyOn(Monitor, "findById").mockResolvedValue({
-      _id: "mon-123",
+      _id: "507f1f77bcf86cd799439123",
       active: false,
+      workspaceId: "607f1f77bcf86cd799439022",
     } as unknown as ReturnType<typeof Monitor.findById>);
     const executeSpy = vi.spyOn(executorService, "executeMonitorHttpCheck");
 
     await processMonitorCheckJob(mockJob);
 
     expect(executeSpy).not.toHaveBeenCalled();
-    expect(releaseSpy).toHaveBeenCalledWith("lock:monitor:mon-123", expect.any(String));
+    expect(releaseSpy).toHaveBeenCalledWith(
+      "lock:monitor:507f1f77bcf86cd799439123",
+      expect.any(String),
+    );
   });
 
   it("executes probe, updates check, updates monitor with configRevision, and publishes event", async () => {
@@ -60,7 +143,7 @@ describe("Monitor Check Worker", () => {
     const publishSpy = vi.spyOn(redisService, "publishDomainEvent").mockResolvedValue(undefined);
 
     vi.spyOn(Monitor, "findById").mockResolvedValue({
-      _id: "mon-123",
+      _id: "507f1f77bcf86cd799439123",
       userId: "507f1f77bcf86cd799439011",
       workspaceId: "607f1f77bcf86cd799439022",
       url: "https://example.com/api",
@@ -85,7 +168,7 @@ describe("Monitor Check Worker", () => {
     });
 
     const updateMonitorSpy = vi.spyOn(Monitor, "findOneAndUpdate").mockResolvedValue({
-      _id: "mon-123",
+      _id: "507f1f77bcf86cd799439123",
     } as unknown as ReturnType<typeof Monitor.findOneAndUpdate>);
 
     await processMonitorCheckJob(mockJob);
@@ -99,7 +182,7 @@ describe("Monitor Check Worker", () => {
     });
 
     expect(updateMonitorSpy).toHaveBeenLastCalledWith(
-      { _id: "mon-123", configRevision: 3, active: true },
+      { _id: "507f1f77bcf86cd799439123", configRevision: 3, active: true },
       {
         $set: expect.objectContaining({
           lastCheckStatus: "success",
@@ -114,7 +197,7 @@ describe("Monitor Check Worker", () => {
       expect.objectContaining({
         workspaceId: "607f1f77bcf86cd799439022",
         payload: expect.objectContaining({
-          monitorId: "mon-123",
+          monitorId: "507f1f77bcf86cd799439123",
           status: "success",
           durationMs: 145,
           statusCode: 200,
@@ -122,13 +205,20 @@ describe("Monitor Check Worker", () => {
       }),
     );
 
+    expect(evaluateCheckForIncident).toHaveBeenCalledWith(
+      mockJob.data.monitorId,
+      expect.objectContaining({ success: true }),
+    );
     const completed = publishSpy.mock.calls.find(([type]) => type === "monitor.check.completed");
     expect(completed?.[1]).not.toHaveProperty("userId");
     for (const [, payload] of publishSpy.mock.calls) {
       expect(payload).toMatchObject({ workspaceId: "607f1f77bcf86cd799439022" });
     }
 
-    expect(releaseSpy).toHaveBeenCalledWith("lock:monitor:mon-123", expect.any(String));
+    expect(releaseSpy).toHaveBeenCalledWith(
+      "lock:monitor:507f1f77bcf86cd799439123",
+      expect.any(String),
+    );
   });
 
   it("publishes failures and paused skips to the monitor's workspace", async () => {
@@ -137,7 +227,7 @@ describe("Monitor Check Worker", () => {
     const publishSpy = vi.spyOn(redisService, "publishDomainEvent").mockResolvedValue(undefined);
 
     vi.spyOn(Monitor, "findById").mockResolvedValue({
-      _id: "mon-123",
+      _id: "507f1f77bcf86cd799439123",
       userId: "507f1f77bcf86cd799439011",
       workspaceId: "607f1f77bcf86cd799439022",
       url: "https://example.com/api",
@@ -152,7 +242,7 @@ describe("Monitor Check Worker", () => {
 
     await processMonitorCheckJob({
       id: "job-2",
-      data: { monitorId: "mon-123", runId: "run-paused", manual: false },
+      data: { monitorId: "507f1f77bcf86cd799439123", runId: "run-paused", manual: false },
     } as unknown as Job<MonitorCheckJobData>);
 
     const failed = publishSpy.mock.calls.find(([type]) => type === "monitor.check.failed");
@@ -169,7 +259,7 @@ describe("Monitor Check Worker", () => {
     vi.spyOn(redisService, "publishDomainEvent").mockResolvedValue(undefined);
 
     vi.spyOn(Monitor, "findById").mockResolvedValue({
-      _id: "mon-123",
+      _id: "507f1f77bcf86cd799439123",
       userId: "507f1f77bcf86cd799439011",
       workspaceId: "607f1f77bcf86cd799439022",
       url: "https://example.com/api",

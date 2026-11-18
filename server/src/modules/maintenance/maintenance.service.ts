@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isObjectIdOrHexString } from "mongoose";
 import { MaintenanceWindow } from "./maintenance.model.js";
 import { Monitor } from "../monitors/monitor.model.js";
 import { createApiError } from "../../lib/errors/create-api-error.js";
@@ -80,6 +81,13 @@ export const matchingMaintenance = async (
   monitorId: string,
   at = new Date(),
 ) => {
+  if (!isObjectIdOrHexString(workspaceId) || !isObjectIdOrHexString(monitorId)) {
+    throw createApiError(
+      "A valid workspace and monitor are required for maintenance lookups.",
+      400,
+      "INVALID_REQUEST",
+    );
+  }
   const windows = await MaintenanceWindow.find({
     workspaceId,
     enabled: true,

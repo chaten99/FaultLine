@@ -1,6 +1,7 @@
 import mongoose, { Types } from "mongoose";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Worker } from "bullmq";
+import { reconcileSchedulers, getSchedulerId } from "../src/queues/monitor-scheduler.service.js";
 import { env } from "../src/config/env.js";
 import { Monitor } from "../src/modules/monitors/monitor.model.js";
 import { MonitorCheck } from "../src/modules/checks/monitor-check.model.js";
@@ -139,5 +140,78 @@ describe.skipIf(!uri || !redisUrl)(
       });
       expect(await MonitorCheck.countDocuments({ monitorId })).toBe(2);
     });
+    it.each([undefined, null, "undefined"])(
+      "acknowledges legacy workspace %s without retrying, then resumes after migration",
+      async (workspaceValue) => {
+        await closeMonitorCheckWorker();
+        const legacyId = new Types.ObjectId();
+        const runId = "legacy-" + legacyId;
+        const legacyUrl = "https://legacy-" + legacyId + ".example";
+        await Monitor.collection.insertOne({
+          _id: legacyId,
+          userId,
+          name: "Legacy monitor",
+          url: legacyUrl,
+          method: "GET",
+          intervalSeconds: 60,
+          timeoutMs: 1000,
+          expectedStatusCodes: [200],
+          active: true,
+          configRevision: 1,
+          ...(workspaceValue === undefined ? {} : { workspaceId: workspaceValue }),
+        } as never);
+        const queue = getMonitorCheckQueue();
+        await queue.upsertJobScheduler(
+          getSchedulerId(String(legacyId)),
+          { every: 60000 },
+          {
+            name: "legacy-check",
+            data: { monitorId: String(legacyId), queuedAt: new Date().toISOString() },
+          },
+        );
+        await reconcileSchedulers();
+        expect(await queue.getJobScheduler(getSchedulerId(String(legacyId)))).toBeUndefined();
+        await MonitorCheck.create({
+          monitorId: legacyId,
+          userId,
+          runId,
+          status: "queued",
+          expiresAt: new Date(Date.now() + 86400000),
+        });
+        await queue.add(
+          "manual-check",
+          { monitorId: String(legacyId), runId, manual: true, queuedAt: new Date().toISOString() },
+          { jobId: runId },
+        );
+        let worker = createMonitorCheckWorker();
+        await completed(worker, runId);
+        expect(await MonitorCheck.findOne({ runId }).lean()).toMatchObject({
+          status: "error",
+          failureCategory: "WORKSPACE_REQUIRED",
+        });
+        expect(
+          vi
+            .mocked(executeMonitorHttpCheck)
+            .mock.calls.filter(([monitor]) => monitor.url === legacyUrl),
+        ).toHaveLength(0);
+        expect(await queue.getJobScheduler(getSchedulerId(String(legacyId)))).toBeUndefined();
+        await closeMonitorCheckWorker();
+        await Monitor.collection.updateOne({ _id: legacyId }, { $set: { workspaceId } });
+        await reconcileSchedulers();
+        expect(await queue.getJobScheduler(getSchedulerId(String(legacyId)))).toBeTruthy();
+        const migratedRun = runId + "-migrated";
+        await queue.add(
+          "check",
+          { monitorId: String(legacyId), runId: migratedRun, queuedAt: new Date().toISOString() },
+          { jobId: migratedRun },
+        );
+        worker = createMonitorCheckWorker();
+        await completed(worker, migratedRun);
+        expect(await MonitorCheck.findOne({ runId: migratedRun }).lean()).toMatchObject({
+          status: "success",
+          configRevision: 1,
+        });
+      },
+    );
   },
 );

@@ -12,7 +12,9 @@ import {
   suppressForMaintenance,
   notifyAfterMaintenance,
   suppressQueuedNotification,
+  reconcileMaintenanceNotifications,
 } from "../src/modules/maintenance/maintenance-notifications.service.js";
+import { MaintenanceWindow } from "../src/modules/maintenance/maintenance.model.js";
 import { Monitor } from "../src/modules/monitors/monitor.model.js";
 import { Incident } from "../src/modules/incidents/incident.model.js";
 import { IncidentTimeline } from "../src/modules/incidents/incident-timeline.model.js";
@@ -167,6 +169,20 @@ describe("maintenance ranges and weekly local times", () => {
   });
 });
 describe("workspace maintenance API", () => {
+  it.each([undefined, null, "undefined", "malformed"])(
+    "rejects an invalid maintenance scope (%s) before MongoDB casting",
+    async (value) => {
+      const find = vi.spyOn(MaintenanceWindow, "find");
+      find.mockClear();
+      await expect(
+        matchingMaintenance(value as unknown as string, String(monitorId)),
+      ).rejects.toMatchObject({ code: "INVALID_REQUEST", statusCode: 400 });
+      await expect(
+        matchingMaintenance(String(workspace), value as unknown as string),
+      ).rejects.toMatchObject({ code: "INVALID_REQUEST", statusCode: 400 });
+      expect(find).not.toHaveBeenCalled();
+    },
+  );
   it("requires authentication and write permission", async () => {
     await request(app).get("/api/maintenance-windows").expect(401);
     await request(app)
@@ -336,6 +352,25 @@ describe("maintenance retains evidence and suppresses outbound alerts", () => {
     await notifyAfterMaintenance(String(workspace), String(monitorId));
     expect(stores.outbox.docs).toHaveLength(1);
   });
+  it("skips malformed legacy outbox scopes without blocking valid follow-ups", async () => {
+    activeWindow();
+    const event = seedEvent();
+    await suppressForMaintenance(event);
+    stores.outbox.docs.unshift({
+      _id: new Types.ObjectId(),
+      eventId: "legacy-event",
+      snapshot: { monitorId: String(monitorId) },
+      maintenanceSuppressed: true,
+      notifyAfterMaintenance: true,
+    });
+    workspaces.maintenance.docs[0]!.endAt = new Date(Date.now() - 1000);
+    await expect(reconcileMaintenanceNotifications()).resolves.toBeUndefined();
+    expect(
+      stores.outbox.docs.filter((e) => String(e.eventId).includes(":after-maintenance:")),
+    ).toHaveLength(1);
+    expect(stores.outbox.docs[0]?.maintenanceResumed).toBeUndefined();
+  });
+
   it("marks a queued event for follow-up without creating a second notification engine", async () => {
     activeWindow();
     const event = seedEvent();
