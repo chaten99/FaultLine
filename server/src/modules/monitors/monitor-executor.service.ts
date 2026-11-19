@@ -2,6 +2,11 @@ import http from "node:http";
 import https from "node:https";
 import dns from "node:dns/promises";
 import net from "node:net";
+import tls from "node:tls";
+import zlib from "node:zlib";
+import { buildRequest, type MonitorSecrets } from "./monitor-credentials.service.js";
+import type { HttpConfig } from "./advanced.validation.js";
+import { evaluateAssertions } from "./response-assertions.js";
 import { isBlockedHostname, isPrivateAddress } from "./monitor-url.service.js";
 import { createApiError } from "../../lib/errors/create-api-error.js";
 
@@ -33,9 +38,11 @@ export type CheckExecutionOutcome = {
   failureCategory?: string;
   errorMessage?: string;
   resolvedIp?: string;
+  nonQualifying?: boolean;
+  details?: ProtocolDetails;
 };
 
-const resolveSafeIp = async (hostname: string): Promise<string> => {
+export const resolveSafeIp = async (hostname: string): Promise<string> => {
   if (isBlockedHostname(hostname)) {
     throw createApiError(
       "Destination hostname is not permitted.",
@@ -63,16 +70,19 @@ const resolveSafeIp = async (hostname: string): Promise<string> => {
   return first.address;
 };
 
-const executeSingleHop = async (
+export const executeSingleHop = async (
   targetUrl: string,
   timeoutMs: number,
   maxBodyBytes: number,
+  settings: { method?: string; headers?: Record<string, string>; body?: string } = {},
 ): Promise<{
   statusCode: number;
   headers: http.IncomingHttpHeaders;
   resolvedIp: string;
   durationMs: number;
+  body: string;
 }> => {
+  const hopStarted = performance.now();
   const parsed = new URL(targetUrl);
   if (!["http:", "https:"].includes(parsed.protocol)) {
     throw createApiError(
@@ -97,43 +107,70 @@ const executeSingleHop = async (
   }
 
   const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  const safeIp = await resolveSafeIp(hostname);
+  const safeIp = await boundedLookup(hostname, timeoutMs);
 
+  timeoutMs = Math.max(1, timeoutMs - (performance.now() - hopStarted));
   const transport = isHttps ? https : http;
 
   return new Promise((resolve, reject) => {
     const startTime = performance.now();
 
     const requestOptions: https.RequestOptions = {
-      method: "GET",
+      method: settings.method ?? "GET",
       host: safeIp,
       port,
       path: parsed.pathname + parsed.search,
       headers: {
+        ...settings.headers,
         Host: parsed.host,
+        "Accept-Encoding": "gzip, deflate, br",
         "User-Agent": "FaultLine-Probe/1.0 (+https://faultline.io)",
         Accept: "*/*",
         Connection: "close",
       },
       servername: net.isIP(hostname) === 0 ? hostname : undefined,
       timeout: timeoutMs,
+      checkServerIdentity: (_host, cert) => tls.checkServerIdentity(hostname, cert),
       lookup: (_hostname, _options, callback) => {
         callback(null, safeIp, net.isIPv6(safeIp) ? 6 : 4);
       },
     };
 
+    const timer = setTimeout(
+      () => req.destroy(createApiError("Request timed out.", 504, "PROBE_TIMEOUT")),
+      timeoutMs,
+    );
     const req = transport.request(requestOptions, (res) => {
+      const encoding = res.headers["content-encoding"];
+      const stream =
+        encoding === "gzip"
+          ? res.pipe(zlib.createGunzip())
+          : encoding === "deflate"
+            ? res.pipe(zlib.createInflate())
+            : encoding === "br"
+              ? res.pipe(zlib.createBrotliDecompress())
+              : res;
+      const chunks: Buffer[] = [];
+      stream.on("error", () =>
+        req.destroy(createApiError("Invalid compressed response.", 400, "INVALID_MONITOR_CONFIG")),
+      );
+      res.on("aborted", () =>
+        req.destroy(createApiError("Response interrupted.", 400, "INVALID_MONITOR_CONFIG")),
+      );
       let bytesRead = 0;
-      res.on("data", (chunk: Buffer) => {
+      stream.on("data", (chunk: Buffer) => {
         bytesRead += chunk.length;
+        if (bytesRead <= maxBodyBytes) chunks.push(chunk);
         if (bytesRead > maxBodyBytes) {
           req.destroy(createApiError("Response body exceeded limit.", 413, "RESPONSE_TOO_LARGE"));
         }
       });
 
-      res.on("end", () => {
+      stream.on("end", () => {
+        clearTimeout(timer);
         const durationMs = Math.max(1, Math.round(performance.now() - startTime));
         resolve({
+          body: Buffer.concat(chunks).toString("utf8"),
           statusCode: res.statusCode ?? 0,
           headers: res.headers,
           resolvedIp: safeIp,
@@ -146,11 +183,13 @@ const executeSingleHop = async (
       req.destroy(createApiError(`Request timed out after ${timeoutMs}ms.`, 504, "PROBE_TIMEOUT"));
     });
 
+    req.once("close", () => clearTimeout(timer));
     req.on("error", (err) => {
+      clearTimeout(timer);
       reject(err);
     });
 
-    req.end();
+    req.end(settings.body);
   });
 };
 
@@ -210,16 +249,40 @@ export const executeMonitorHttpCheck = async (monitor: {
   url: string;
   timeoutMs: number;
   expectedStatusCodes: number[];
+  method?: string;
+  httpConfig?: HttpConfig;
+  secrets?: MonitorSecrets;
 }): Promise<CheckExecutionOutcome> => {
   const startTime = performance.now();
   try {
-    const hop = await executeSingleHop(monitor.url, monitor.timeoutMs, 65536);
+    const hop = await executeSingleHop(monitor.url, monitor.timeoutMs, 65536, {
+      method: monitor.method,
+      ...buildRequest(monitor.httpConfig, monitor.secrets ?? {}),
+    });
     const durationMs = hop.durationMs;
     const isSuccess = monitor.expectedStatusCodes.includes(hop.statusCode);
 
+    const assertionResults = evaluateAssertions(hop.body, monitor.httpConfig);
+    const details = {
+      method: monitor.method ?? "GET",
+      destination: new URL(monitor.url).origin,
+      authType: monitor.httpConfig?.authType ?? "none",
+      expectedStatusCodes: monitor.expectedStatusCodes,
+      assertionResults,
+    };
+    if (isSuccess && assertionResults.some((r) => !r.passed))
+      return {
+        success: false,
+        statusCode: hop.statusCode,
+        durationMs,
+        failureCategory: "RESPONSE_ASSERTION_FAILED",
+        errorMessage: "Response assertions failed.",
+        details,
+      };
     if (isSuccess) {
       return {
         success: true,
+        details,
         statusCode: hop.statusCode,
         durationMs,
         resolvedIp: hop.resolvedIp,
@@ -228,6 +291,7 @@ export const executeMonitorHttpCheck = async (monitor: {
 
     return {
       success: false,
+      details,
       statusCode: hop.statusCode,
       durationMs,
       failureCategory: "UNEXPECTED_STATUS",
@@ -252,14 +316,21 @@ export const executeMonitorHttpCheck = async (monitor: {
       ) {
         failureCategory = "SSRF_PROHIBITED";
         errorMessage = "Destination address is prohibited by security policy.";
-      } else if (err.code === "DNS_RESOLUTION_FAILED") {
+      } else if (
+        ["DNS_RESOLUTION_FAILED", "ENOTFOUND", "EAI_AGAIN", "ENODATA"].includes(err.code ?? "")
+      ) {
         failureCategory = "DNS_FAILURE";
         errorMessage = "Could not resolve hostname.";
       } else if (err.code === "RESPONSE_TOO_LARGE") {
         failureCategory = "RESPONSE_TOO_LARGE";
         errorMessage = "Response payload exceeded maximum allowed threshold (64KB).";
-      } else if (err.message) {
-        errorMessage = err.message.slice(0, 500);
+      } else if (
+        err.code?.startsWith("ERR_TLS") ||
+        err.code?.includes("CERT") ||
+        err.code?.includes("VERIFY")
+      ) {
+        failureCategory = "TLS_INVALID";
+        errorMessage = "TLS certificate verification failed.";
       }
     }
 
@@ -267,7 +338,49 @@ export const executeMonitorHttpCheck = async (monitor: {
       success: false,
       durationMs,
       failureCategory,
+      nonQualifying: failureCategory === "SSRF_PROHIBITED",
       errorMessage,
     };
   }
+};
+
+export const boundedLookup = async (hostname: string, timeoutMs: number): Promise<string> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      resolveSafeIp(hostname),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(createApiError("DNS lookup timed out.", 504, "PROBE_TIMEOUT")),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+export type ProtocolDetails = {
+  method?: string;
+  destination?: string;
+  authType?: string;
+  expectedStatusCodes?: number[];
+  assertionResults?: Array<{ index: number; passed: boolean; message: string }>;
+  certificateExpiresAt?: Date;
+  validFrom?: Date;
+  daysRemaining?: number;
+  issuer?: string;
+  subject?: string;
+  subjectAltNames?: string[];
+  hostnameValid?: boolean;
+  certificateValid?: boolean;
+  hostname?: string;
+  recordType?: string;
+  values?: string[];
+  expectedValues?: string[];
+  classification?: string;
+  provider?: string;
+  lastSuccessfulLookup?: Date;
+  expiryDate?: Date;
 };

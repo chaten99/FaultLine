@@ -38,7 +38,8 @@ export type FailureCategory =
   | "INTEGRATION_UNAVAILABLE"
   | "CONFIGURATION_ERROR"
   | "SUBSCRIPTION_INACTIVE"
-  | "UNKNOWN";
+  | "UNKNOWN"
+  | "MAINTENANCE_SUPPRESSED";
 
 export type IncidentNotificationSnapshot = {
   incidentId: string;
@@ -81,6 +82,7 @@ export type ChannelResult =
     };
 
 export const failureMessages: Record<FailureCategory, string> = {
+  MAINTENANCE_SUPPRESSED: "Notification suppressed during maintenance.",
   NETWORK_ERROR: "The destination could not be reached.",
   TIMEOUT: "The destination did not respond in time.",
   RATE_LIMITED: "The destination is rate limiting requests.",

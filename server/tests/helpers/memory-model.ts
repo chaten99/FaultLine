@@ -47,6 +47,10 @@ const matchesCondition = (actual: unknown, condition: unknown): boolean => {
     return Object.entries(condition as Record<string, unknown>).every(([operator, expected]) => {
       const left = comparable(actual);
       switch (operator) {
+        case "$size":
+          return Array.isArray(actual) && actual.length === expected;
+        case "$exists":
+          return (actual !== undefined) === expected;
         case "$in":
           return (expected as unknown[]).some((item) => comparable(item) === left);
         case "$ne":

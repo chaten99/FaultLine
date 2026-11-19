@@ -14,6 +14,8 @@ import { failureMessages } from "./notification.types.js";
 import type { ChannelResult } from "./notification.types.js";
 import type { SecureClientDeps } from "./secure-http.service.js";
 
+import { suppressQueuedNotification } from "../maintenance/maintenance-notifications.service.js";
+
 const retentionMs = 90 * 24 * 60 * 60 * 1000;
 const claimableStatuses = ["pending", "queued", "retrying", "sending"];
 
@@ -83,14 +85,36 @@ export const processDelivery = async (
   );
   if (!claimed) return { outcome: "skipped" };
 
+  if (
+    claimed.kind === "incident" &&
+    claimed.snapshot &&
+    (await suppressQueuedNotification(
+      String(claimed.workspaceId),
+      claimed.snapshot.monitorId,
+      claimed.eventId,
+    ))
+  ) {
+    await NotificationDelivery.updateOne(
+      { _id: claimed._id },
+      {
+        $set: {
+          status: "failed",
+          failureCategory: "MAINTENANCE_SUPPRESSED",
+          message: "Notification suppressed during maintenance.",
+        },
+        $unset: { nextRetryAt: "" },
+      },
+    );
+    return { outcome: "skipped" };
+  }
   const workspaceId = String(claimed.workspaceId);
   await publishDeliveryUpdate(workspaceId, data.deliveryId, "sending");
 
   let result: ChannelResult;
   try {
     result = await sendDelivery(claimed, options.deps);
-  } catch (error) {
-    logger.error({ err: error, deliveryId: data.deliveryId }, "Notification sender crashed");
+  } catch {
+    logger.error({ deliveryId: data.deliveryId }, "Notification sender crashed");
     result = {
       ok: false,
       category: "UNKNOWN",
@@ -176,7 +200,11 @@ export const retryFailedDelivery = async (workspaceId: string, deliveryId: strin
     workspaceId: new Types.ObjectId(workspaceId),
   });
   if (!existing) throw createApiError("Delivery not found.", 404, "DELIVERY_NOT_FOUND");
-  if (existing.status !== "failed" || existing.kind !== "incident") {
+  if (
+    existing.status !== "failed" ||
+    existing.kind !== "incident" ||
+    existing.failureCategory === "MAINTENANCE_SUPPRESSED"
+  ) {
     throw createApiError(
       "Only failed incident notifications can be retried.",
       409,

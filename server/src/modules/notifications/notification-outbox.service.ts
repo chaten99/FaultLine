@@ -9,6 +9,8 @@ import { NotificationOutbox } from "./notification-outbox.model.js";
 import { dispatchOutboxEvent } from "./notification-dispatcher.service.js";
 import type { IncidentEventType, IncidentNotificationSnapshot } from "./notification.types.js";
 
+import { maintenanceNotificationPolicy } from "../maintenance/maintenance-notifications.service.js";
+
 const outboxRetentionMs = 30 * 24 * 60 * 60 * 1000;
 
 export const buildEventId = (type: IncidentEventType, incidentId: string): string =>
@@ -81,10 +83,16 @@ export const persistOutboxEvent = async (
       : type === "incident.acknowledged"
         ? snapshot.acknowledgedAt
         : snapshot.resolvedAt;
+  const maintenancePolicy = await maintenanceNotificationPolicy(
+    String(loaded.workspaceId),
+    snapshot.monitorId,
+    new Date(eventAt ?? Date.now()),
+  );
   await NotificationOutbox.updateOne(
     { eventId },
     {
       $setOnInsert: {
+        ...(maintenancePolicy ?? {}),
         eventId,
         type,
         workspaceId: loaded.workspaceId,

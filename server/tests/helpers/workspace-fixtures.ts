@@ -4,16 +4,24 @@ import { Workspace } from "../../src/modules/workspaces/workspace.model.js";
 import type { WorkspaceRole } from "../../src/modules/workspaces/workspace.types.js";
 import { bindMemoryModel, type MemoryStore } from "./memory-model.js";
 
-export type WorkspaceStores = { workspaces: MemoryStore; members: MemoryStore };
+import { MaintenanceWindow } from "../../src/modules/maintenance/maintenance.model.js";
+
+export type WorkspaceStores = {
+  workspaces: MemoryStore;
+  members: MemoryStore;
+  maintenance: MemoryStore;
+};
 
 export const bindWorkspaceModels = (): WorkspaceStores => ({
   workspaces: bindMemoryModel(Workspace, { uniqueKeys: ["slug"] }),
   members: bindMemoryModel(WorkspaceMember),
+  maintenance: bindMemoryModel(MaintenanceWindow),
 });
 
 export const resetWorkspaceModels = (stores: WorkspaceStores) => {
   stores.workspaces.reset();
   stores.members.reset();
+  stores.maintenance.reset();
 };
 
 export type SeedMember = { userId: Types.ObjectId; role: Exclude<WorkspaceRole, "owner"> };

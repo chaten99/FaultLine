@@ -1,3 +1,4 @@
+import { NotificationOutbox } from "../notifications/notification-outbox.model.js";
 import { Types } from "mongoose";
 import { env } from "../../config/env.js";
 import { logger } from "../../config/logger.js";
@@ -116,6 +117,8 @@ export const enqueueSubscriberDelivery = async (delivery: {
 
 export type SubscriberOutcome = "delivered" | "failed" | "retrying" | "skipped";
 
+import { suppressQueuedNotification } from "../maintenance/maintenance-notifications.service.js";
+
 export const processSubscriberDelivery = async (
   data: { deliveryId: string; generation: number },
   options: { maxAttempts?: number } = {},
@@ -134,6 +137,24 @@ export const processSubscriberDelivery = async (
   );
   if (!claimed) return { outcome: "skipped" };
 
+  const outbox = await NotificationOutbox.findOne({ eventId: claimed.eventId }).lean();
+  if (
+    outbox &&
+    (await suppressQueuedNotification(
+      String(outbox.workspaceId),
+      outbox.snapshot.monitorId,
+      claimed.eventId,
+    ))
+  ) {
+    await StatusPageDelivery.updateOne(
+      { _id: claimed._id },
+      {
+        $set: { status: "failed", failureCategory: "MAINTENANCE_SUPPRESSED" },
+        $unset: { nextRetryAt: "" },
+      },
+    );
+    return { outcome: "failed" };
+  }
   const [subscriber, page] = await Promise.all([
     StatusPageSubscriber.findById(claimed.subscriberId),
     PublicStatusPage.findById(claimed.pageId),

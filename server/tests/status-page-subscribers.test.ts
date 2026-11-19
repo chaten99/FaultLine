@@ -6,6 +6,7 @@ import { app } from "../src/app.js";
 import { sendNotificationEmail } from "../src/lib/email/email.service.js";
 import { Incident } from "../src/modules/incidents/incident.model.js";
 import { Monitor } from "../src/modules/monitors/monitor.model.js";
+import { NotificationOutbox } from "../src/modules/notifications/notification-outbox.model.js";
 import type { INotificationOutbox } from "../src/modules/notifications/notification-outbox.model.js";
 import { StatusPageDelivery } from "../src/modules/status-pages/status-page-delivery.model.js";
 import {
@@ -61,6 +62,7 @@ vi.mock("../src/lib/email/email.service.js", () => ({
   sendNotificationEmail: vi.fn(),
 }));
 
+const outboxStore = bindMemoryModel(NotificationOutbox);
 const sendMock = vi.mocked(sendNotificationEmail);
 const monitors = bindMemoryModel(Monitor);
 const incidents = bindMemoryModel(Incident);
@@ -145,6 +147,7 @@ const subscribe = (email: string, body: Record<string, unknown> = {}, slug = "ac
 const flush = () => vi.waitFor(() => expect(sendMock).toHaveBeenCalled());
 
 beforeEach(() => {
+  outboxStore.reset();
   [monitors, incidents, pages, services, subscribers, deliveries].forEach((store) => store.reset());
   resetWorkspaceModels(workspaceStores);
   seedWorkspace(workspaceStores, { ownerId: owner, id: workspaceId });

@@ -4,9 +4,12 @@ import { recoverStaleDeliveries } from "./notification-delivery.service.js";
 import { recoverStaleSubscriberDeliveries } from "../status-pages/status-page-delivery.service.js";
 import { reconcileIncidentEvents } from "./notification-outbox.service.js";
 
+import { reconcileMaintenanceNotifications } from "../maintenance/maintenance-notifications.service.js";
+
 export const runNotificationMaintenance = async (): Promise<void> => {
   const steps: Array<[string, () => Promise<unknown>]> = [
     ["reconcile incident events", () => reconcileIncidentEvents()],
+    ["maintenance follow-up alerts", () => reconcileMaintenanceNotifications()],
     ["dispatch outbox", () => processOutboxBatch()],
     ["recover stale deliveries", () => recoverStaleDeliveries()],
     ["recover stale subscriber deliveries", () => recoverStaleSubscriberDeliveries()],

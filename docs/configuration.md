@@ -81,3 +81,13 @@ Subscriber emails use the existing `RESEND_API_KEY`, `RESEND_FROM_EMAIL` and not
 Invitation emails use the existing `RESEND_API_KEY`, `RESEND_FROM_EMAIL` and `APP_ORIGIN` (links point to `<APP_ORIGIN>/invitations/accept`). Run `npm run migrate:workspaces` (dry-run) and then `-- --execute` when upgrading an existing installation.
 
 Set `ANALYTICS_TEST_MONGODB_URI` to a throwaway database to also run the MongoDB-backed integration tests (analytics, workspaces and the migration); it is dropped by the tests.
+
+## Advanced monitor credentials
+
+No new environment keys are required. Authenticated checks, secret headers and request bodies reuse the server-only NOTIFICATION_ENCRYPTION_KEY: exactly 64 hexadecimal characters encoding 32 bytes. Configure the same key for the API and monitoring workers through your secret manager. Leave it out of all Vite variables and browser configuration. Public GET monitors without encrypted configuration continue to work without it. Saving encrypted data fails explicitly when it is not configured. Existing .env.local values are preserved.
+
+Credentials can be replaced or removed through the monitor edit form without reading the old value. After a credential rotation, queued jobs load the current revision. A key change requires an offline migration that decrypts and re-encrypts every notification integration and monitor envelope with its original authentication context before all API/worker instances adopt the replacement key. Retain the old key securely until migration and backup verification are complete. Simply changing the key makes existing secrets unreadable; automatic multi-key migration is not provided.
+
+RDAP uses the public IANA bootstrap and the authoritative HTTPS registry endpoints it advertises. No paid provider credentials or arbitrary user-supplied provider/proxy URLs are accepted. Outbound DNS, HTTPS and verified TLS access must be available to the worker. Provider rate limiting, withheld dates, redirects or unsupported TLDs produce unknown registration data rather than expiry incidents.
+
+Maintenance follows IANA timezone rules supplied by the Node runtime. Keep the runtime timezone data current. Start/end values in the API must include Z or an explicit UTC offset. The UI accepts UTC instants and shows the selected timezone when listing a window. Notification policy defaults to notifyDuring=false and notifyAfter=true, while real checks, incidents and uptime continue throughout maintenance.
