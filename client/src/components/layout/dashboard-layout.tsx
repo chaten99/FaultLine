@@ -157,6 +157,9 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
           >
             Profile
           </NavLink>
+          <SettingsNavLink to="/maintenance" onNavigate={() => setOpen(false)}>
+            Maintenance
+          </SettingsNavLink>
           <SettingsNavLink to="/settings/workspace" onNavigate={() => setOpen(false)}>
             Workspace
           </SettingsNavLink>

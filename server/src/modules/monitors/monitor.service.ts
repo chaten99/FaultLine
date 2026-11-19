@@ -20,6 +20,104 @@ import {
   recordMonitorCreated,
 } from "./monitor-lifecycle.service.js";
 
+import {
+  hostnameSchema,
+  httpConfigSchema,
+  tlsConfigSchema,
+  dnsConfigSchema,
+  domainConfigSchema,
+} from "./advanced.validation.js";
+import {
+  protectHttpConfig,
+  decodeMonitorSecrets,
+  secretContext,
+} from "./monitor-credentials.service.js";
+const advancedFields = [
+  "type",
+  "httpConfig",
+  "tlsConfig",
+  "dnsConfig",
+  "domainConfig",
+  "encryptedSecrets",
+];
+const prepareConfiguration = async (
+  input: Record<string, unknown>,
+  workspaceId: string,
+  id: string,
+  previous?: import("mongoose").HydratedDocument<
+    import("mongoose").InferSchemaType<typeof Monitor.schema>
+  >,
+) => {
+  const type = String(input.type ?? previous?.type ?? "http");
+  if (previous && input.type && input.type !== (previous.type ?? "http"))
+    throw createApiError("Create a new monitor to change its type.", 400, "INVALID_MONITOR_CONFIG");
+  const url = String(input.url ?? previous?.url ?? "");
+  if (type === "http" || type === "tls") {
+    if (!previous || input.url !== undefined) await validateMonitorUrl(url);
+    if (
+      type === "tls" &&
+      (new URL(url).protocol !== "https:" ||
+        ![443, 8443].includes(Number(new URL(url).port || 443)))
+    )
+      throw createApiError(
+        "TLS monitors require an HTTPS endpoint on port 443 or 8443.",
+        400,
+        "INVALID_MONITOR_CONFIG",
+      );
+  } else if (input.url !== undefined) input.url = hostnameSchema.parse(url);
+  for (const [key, schema] of [
+    ["tlsConfig", tlsConfigSchema],
+    ["dnsConfig", dnsConfigSchema],
+    ["domainConfig", domainConfigSchema],
+  ] as const) {
+    if (input[key] !== undefined) input[key] = schema.parse(input[key]);
+  }
+  if (type === "dns" && !input.dnsConfig && !previous?.dnsConfig)
+    throw createApiError("DNS configuration is required.", 400, "INVALID_MONITOR_CONFIG");
+  for (const key of ["httpConfig", "tlsConfig", "dnsConfig", "domainConfig"])
+    if (input[key] !== undefined && key !== type + "Config")
+      throw createApiError(
+        "Configuration does not match the monitor type.",
+        400,
+        "INVALID_MONITOR_CONFIG",
+      );
+  if (input.httpConfig !== undefined) {
+    const context = secretContext(workspaceId, id);
+    const stored = previous
+      ? await Monitor.findOne({
+          _id: id,
+          workspaceId,
+          configRevision: previous.configRevision,
+        }).select("+encryptedSecrets")
+      : null;
+    if (previous && !stored)
+      throw createApiError(
+        "This monitor was modified concurrently. Please refresh and try again.",
+        409,
+        "CONCURRENT_UPDATE_CONFLICT",
+      );
+    const secrets = decodeMonitorSecrets(stored?.encryptedSecrets, context);
+    const config = httpConfigSchema.parse(input.httpConfig);
+    const protectedConfig = protectHttpConfig(config, secrets, context);
+    if (
+      (input.method ?? previous?.method ?? "GET") === "GET" &&
+      protectedConfig.httpConfig.bodySaved
+    )
+      throw createApiError("GET requests cannot include a body.", 400, "INVALID_MONITOR_CONFIG");
+    Object.assign(input, protectedConfig);
+  }
+  if (
+    (input.method ?? previous?.method) === "GET" &&
+    previous?.httpConfig?.bodySaved &&
+    input.httpConfig === undefined
+  )
+    throw createApiError(
+      "Remove the saved body before changing to GET.",
+      400,
+      "INVALID_MONITOR_CONFIG",
+    );
+};
+
 const ensureOwned = async (ctx: WorkspaceContext, monitorId: string) => {
   if (!Types.ObjectId.isValid(monitorId) || !/^[a-f\d]{24}$/i.test(monitorId)) {
     throw createApiError("Monitor not found.", 404, "MONITOR_NOT_FOUND");
@@ -27,10 +125,6 @@ const ensureOwned = async (ctx: WorkspaceContext, monitorId: string) => {
   const monitor = await Monitor.findOne({ _id: monitorId, workspaceId: ctx.workspaceId });
   if (!monitor) throw createApiError("Monitor not found.", 404, "MONITOR_NOT_FOUND");
   return monitor;
-};
-
-const validateUrlIfPresent = async (url: string | undefined) => {
-  if (url) await validateMonitorUrl(url);
 };
 
 export const listMonitors = async (
@@ -88,8 +182,10 @@ export const createMonitor = async (
   ctx: WorkspaceContext,
   input: { url: string; [key: string]: unknown },
 ) => {
-  await validateMonitorUrl(input.url);
+  const id = new Types.ObjectId();
+  await prepareConfiguration(input, ctx.workspaceId, String(id));
   const allowedFields = [
+    ...advancedFields,
     "name",
     "url",
     "method",
@@ -107,6 +203,7 @@ export const createMonitor = async (
     }
   }
   const monitor = await Monitor.create({
+    _id: id,
     ...sanitized,
     userId: ctx.userId,
     workspaceId: ctx.workspaceId,
@@ -136,9 +233,10 @@ export const updateMonitor = async (
   input: { url?: string; version?: number; [key: string]: unknown },
 ) => {
   const previous = await ensureOwned(ctx, monitorId);
-  await validateUrlIfPresent(input.url);
+  await prepareConfiguration(input, ctx.workspaceId, monitorId, previous);
 
   const allowedFields = [
+    ...advancedFields,
     "name",
     "url",
     "method",
@@ -156,7 +254,11 @@ export const updateMonitor = async (
     }
   }
 
-  const query: Record<string, unknown> = { _id: monitorId, workspaceId: ctx.workspaceId };
+  const query: Record<string, unknown> = {
+    _id: monitorId,
+    workspaceId: ctx.workspaceId,
+    configRevision: previous.configRevision,
+  };
   if (typeof input.version === "number") {
     query.__v = input.version;
   }
@@ -168,7 +270,7 @@ export const updateMonitor = async (
   );
 
   if (!monitor) {
-    if (typeof input.version === "number") {
+    if (previous) {
       throw createApiError(
         "This monitor was modified concurrently. Please refresh and try again.",
         409,

@@ -18,6 +18,8 @@ import { WorkspaceInvitation } from "./workspace-invitation.model.js";
 import { WorkspaceMember } from "./workspace-member.model.js";
 import { Workspace } from "./workspace.model.js";
 
+import { MaintenanceWindow } from "../maintenance/maintenance.model.js";
+
 export const purgeWorkspace = async (workspaceId: string): Promise<void> => {
   const id = new Types.ObjectId(workspaceId);
   const monitorIds = (await Monitor.find({ workspaceId: id }).select("_id").lean()).map(
@@ -44,6 +46,7 @@ export const purgeWorkspace = async (workspaceId: string): Promise<void> => {
   await PublicStatusPage.deleteMany({ workspaceId: id });
   await Incident.deleteMany({ workspaceId: id });
   await Monitor.deleteMany({ workspaceId: id });
+  await MaintenanceWindow.deleteMany({ workspaceId: id });
   await NotificationDelivery.deleteMany({ workspaceId: id });
   await NotificationOutbox.deleteMany({ workspaceId: id });
   await NotificationIntegration.deleteMany({ workspaceId: id });

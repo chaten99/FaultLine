@@ -1,5 +1,7 @@
 import { Schema, model } from "mongoose";
 
+import { protocolDetailsModel } from "../monitors/advanced.model.js";
+
 export const checkStatuses = [
   "queued",
   "running",
@@ -12,6 +14,12 @@ export type CheckStatus = (typeof checkStatuses)[number];
 
 const monitorCheckSchema = new Schema(
   {
+    monitorType: { type: String, enum: ["http", "tls", "dns", "domain"], default: "http" },
+    configRevision: Number,
+    executionDurationMs: Number,
+    details: { type: protocolDetailsModel },
+    underMaintenance: Boolean,
+    maintenanceWindowIds: [String],
     monitorId: {
       type: Schema.Types.ObjectId,
       ref: "Monitor",

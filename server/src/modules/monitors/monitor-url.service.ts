@@ -25,7 +25,8 @@ export const isPrivateIpv4 = (address: string): boolean => {
     (first === 100 && second >= 64 && second <= 127) ||
     (first === 172 && second >= 16 && second <= 31) ||
     (first === 169 && second === 254) ||
-    (first === 192 && second === 168) ||
+    (first === 192 && (second === 168 || second === 0)) ||
+    (first === 198 && (second === 18 || second === 19)) ||
     first >= 224
   );
 };
@@ -33,6 +34,24 @@ export const isPrivateIpv4 = (address: string): boolean => {
 export const isPrivateIpv6 = (address: string): boolean => {
   const normalized = address.toLowerCase().replace(/^\[|\]$/g, "");
   if (normalized === "::" || normalized === "::1") return true;
+  if (net.isIPv6(normalized)) {
+    const canonical = new URL("http://[" + normalized + "]").hostname.slice(1, -1);
+    if (canonical.startsWith("::ffff:")) {
+      const words = canonical.slice(7).split(":");
+      if (words.length === 2) {
+        const high = parseInt(words[0]!, 16),
+          low = parseInt(words[1]!, 16);
+        return isPrivateIpv4([high >> 8, high & 255, low >> 8, low & 255].join("."));
+      }
+    }
+    if (
+      canonical === "::" ||
+      canonical === "::1" ||
+      canonical.startsWith("ff") ||
+      canonical.startsWith("::")
+    )
+      return true;
+  }
   if (normalized.startsWith("::ffff:")) {
     const mapped = normalized.slice(7);
     if (net.isIPv4(mapped)) return isPrivateIpv4(mapped);
@@ -55,7 +74,10 @@ export const isPrivateAddress = (address: string): boolean => {
 };
 
 export const isBlockedHostname = (hostname: string): boolean => {
-  const lower = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const lower = hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.$/, "");
   if (blockedHostnames.has(lower)) return true;
   if (
     lower.endsWith(".localhost") ||
@@ -82,6 +104,9 @@ export const validateMonitorUrl = async (value: string) => {
       "INVALID_MONITOR_URL",
     );
   }
+  const port = Number(parsed.port || (parsed.protocol === "https:" ? 443 : 80));
+  if (![80, 443, 8080, 8443].includes(port))
+    throw createApiError("Choose port 80, 443, 8080 or 8443.", 400, "INVALID_MONITOR_URL");
   const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (isBlockedHostname(hostname)) {
     throw createApiError(
@@ -91,7 +116,13 @@ export const validateMonitorUrl = async (value: string) => {
     );
   }
   try {
-    const addresses = await dns.lookup(hostname, { all: true });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const addresses = await Promise.race([
+      dns.lookup(hostname, { all: true }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("DNS lookup timed out")), 5000);
+      }),
+    ]).finally(() => clearTimeout(timer));
     if (addresses.some(({ address }) => isPrivateAddress(address))) {
       throw createApiError(
         "Monitor URLs cannot target private or local addresses.",

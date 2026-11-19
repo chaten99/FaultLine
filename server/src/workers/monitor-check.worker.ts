@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import { isObjectIdOrHexString } from "mongoose";
+import { unscheduleMonitor } from "../queues/monitor-scheduler.service.js";
 import { Job, Worker } from "bullmq";
 import { env } from "../config/env.js";
 import { logger } from "../config/logger.js";
@@ -10,17 +12,22 @@ import {
 } from "../lib/redis/redis.service.js";
 import { Monitor } from "../modules/monitors/monitor.model.js";
 import { MonitorCheck, type CheckStatus } from "../modules/checks/monitor-check.model.js";
-import { executeMonitorHttpCheck } from "../modules/monitors/monitor-executor.service.js";
+import { executeAdvancedCheck } from "../modules/monitors/advanced-executor.service.js";
+import { matchingMaintenance } from "../modules/maintenance/maintenance.service.js";
+import {
+  notifyAfterMaintenance,
+  markIncidentDuringMaintenance,
+} from "../modules/maintenance/maintenance-notifications.service.js";
 import { evaluateCheckForIncident } from "../modules/incidents/incident.service.js";
 import type { MonitorCheckJobData } from "../queues/monitor-check.queue.js";
 
 export const processMonitorCheckJob = async (job: Job<MonitorCheckJobData>): Promise<void> => {
   const { monitorId, manual } = job.data;
-  if (!monitorId) return;
+  if (!isObjectIdOrHexString(monitorId)) return;
 
   const lockKey = `lock:monitor:${monitorId}`;
   const lockToken = crypto.randomUUID();
-  const acquired = await acquireLock(lockKey, lockToken, 30000);
+  const acquired = await acquireLock(lockKey, lockToken, 60000);
 
   if (!acquired) {
     throw new Error(`Monitor check lock is active for monitor ${monitorId}`);
@@ -30,6 +37,28 @@ export const processMonitorCheckJob = async (job: Job<MonitorCheckJobData>): Pro
     const monitor = await Monitor.findById(monitorId);
     if (!monitor) {
       logger.info({ monitorId }, "Monitor not found or deleted, skipping check");
+      return;
+    }
+
+    if (!isObjectIdOrHexString(monitor.workspaceId)) {
+      await unscheduleMonitor(monitorId);
+      if (job.data.runId) {
+        await MonitorCheck.findOneAndUpdate(
+          { monitorId: monitor._id, runId: job.data.runId, status: { $in: ["queued", "running"] } },
+          {
+            $set: {
+              status: "error",
+              completedAt: new Date(),
+              failureCategory: "WORKSPACE_REQUIRED",
+              errorMessage: "This monitor requires workspace migration before checks can run.",
+            },
+          },
+        );
+      }
+      logger.warn(
+        { monitorId },
+        "Skipped monitor without a valid workspace; run the workspace migration before resuming checks",
+      );
       return;
     }
 
@@ -96,17 +125,18 @@ export const processMonitorCheckJob = async (job: Job<MonitorCheckJobData>): Pro
       },
     });
 
-    const outcome = await executeMonitorHttpCheck({
-      url: monitor.url,
-      timeoutMs: monitor.timeoutMs,
-      expectedStatusCodes: monitor.expectedStatusCodes,
-    });
+    const executionStarted = performance.now();
+    const outcome = await executeAdvancedCheck(monitor);
+    const executionDurationMs = Math.max(1, Math.round(performance.now() - executionStarted));
+    const maintenance = await matchingMaintenance(String(monitor.workspaceId), String(monitor._id));
 
     const terminalStatus: CheckStatus = outcome.success
       ? "success"
-      : outcome.failureCategory === "TIMEOUT"
-        ? "timeout"
-        : "failure";
+      : outcome.nonQualifying
+        ? "error"
+        : outcome.failureCategory === "TIMEOUT"
+          ? "timeout"
+          : "failure";
 
     const completedAt = new Date();
 
@@ -114,6 +144,12 @@ export const processMonitorCheckJob = async (job: Job<MonitorCheckJobData>): Pro
       $set: {
         status: terminalStatus,
         completedAt,
+        monitorType: monitor.type ?? "http",
+        configRevision: targetRevision,
+        executionDurationMs,
+        details: outcome.details,
+        underMaintenance: maintenance.length > 0,
+        maintenanceWindowIds: maintenance.map((w) => String(w._id)),
         responseDurationMs: outcome.durationMs,
         statusCode: outcome.statusCode,
         failureCategory: outcome.failureCategory,
@@ -165,14 +201,18 @@ export const processMonitorCheckJob = async (job: Job<MonitorCheckJobData>): Pro
     );
 
     try {
-      await evaluateCheckForIncident(String(monitor._id), {
-        runId,
-        success: outcome.success,
-        statusCode: outcome.statusCode,
-        failureCategory: outcome.failureCategory,
-        errorMessage: outcome.errorMessage,
-        completedAt,
-      });
+      if (!outcome.nonQualifying && updateResult)
+        await evaluateCheckForIncident(String(monitor._id), {
+          runId,
+          success: outcome.success,
+          statusCode: outcome.statusCode,
+          failureCategory: outcome.failureCategory,
+          errorMessage: outcome.errorMessage,
+          completedAt,
+        });
+      if (maintenance.length)
+        await markIncidentDuringMaintenance(String(monitor.workspaceId), String(monitor._id));
+      await notifyAfterMaintenance(String(monitor.workspaceId), String(monitor._id));
     } catch (incidentErr) {
       logger.error(
         { monitorId, err: incidentErr },
@@ -205,11 +245,16 @@ export const createMonitorCheckWorker = (): Worker<MonitorCheckJobData> => {
       logger.error({ err: err.message }, "BullMQ worker error");
     });
     workerInstance.on("failed", (job, err) => {
-      if (!job || job.attemptsMade < Number(job.opts.attempts ?? 1)) return;
+      if (
+        !job ||
+        !isObjectIdOrHexString(job.data.monitorId) ||
+        job.attemptsMade < Number(job.opts.attempts ?? 1)
+      )
+        return;
       void (async () => {
         const monitor = await Monitor.findById(job.data.monitorId);
         const runId = job.data.runId ?? String(job.id ?? "unknown");
-        if (!monitor) return;
+        if (!monitor || !isObjectIdOrHexString(monitor.workspaceId)) return;
         const completedAt = new Date();
         const expiresAt = new Date(Date.now() + (env.CHECK_RETENTION_DAYS || 30) * 86400000);
         await MonitorCheck.findOneAndUpdate(

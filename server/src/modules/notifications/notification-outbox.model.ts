@@ -18,6 +18,10 @@ export interface INotificationOutbox {
   nextAttemptAt: Date;
   lockedUntil?: Date;
   processedAt?: Date;
+  maintenanceSuppressed?: boolean;
+  notifyAfterMaintenance?: boolean;
+  maintenanceResumed?: boolean;
+  maintenanceCycle?: string;
   lastError?: string;
   expiresAt: Date;
   createdAt: Date;
@@ -43,6 +47,10 @@ const outboxSchema = new Schema<INotificationOutbox>(
     nextAttemptAt: { type: Date, required: true },
     lockedUntil: { type: Date },
     processedAt: { type: Date },
+    maintenanceSuppressed: Boolean,
+    notifyAfterMaintenance: Boolean,
+    maintenanceResumed: Boolean,
+    maintenanceCycle: String,
     lastError: { type: String, maxlength: 200 },
     expiresAt: { type: Date, required: true },
   },
