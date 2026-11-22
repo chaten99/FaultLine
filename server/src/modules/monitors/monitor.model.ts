@@ -1,5 +1,7 @@
 import { Schema, model } from "mongoose";
 
+import { httpConfigModel, tlsConfigModel, dnsConfigModel } from "./advanced.model.js";
+
 export const monitorIntervals = [60, 300, 600, 900, 1800, 3600] as const;
 export type MonitorInterval = (typeof monitorIntervals)[number];
 
@@ -9,7 +11,18 @@ const monitorSchema = new Schema(
     workspaceId: { type: Schema.Types.ObjectId, ref: "Workspace", required: true },
     name: { type: String, required: true, trim: true, maxlength: 100 },
     url: { type: String, required: true, trim: true, maxlength: 2048 },
-    method: { type: String, enum: ["GET"], required: true, default: "GET" },
+    method: {
+      type: String,
+      enum: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+      required: true,
+      default: "GET",
+    },
+    type: { type: String, enum: ["http", "tls", "dns", "domain"], default: "http" },
+    httpConfig: { type: httpConfigModel },
+    tlsConfig: { type: tlsConfigModel },
+    dnsConfig: { type: dnsConfigModel },
+    domainConfig: { type: tlsConfigModel },
+    encryptedSecrets: { type: String, select: false },
     intervalSeconds: { type: Number, enum: monitorIntervals, required: true },
     timeoutMs: { type: Number, required: true, min: 1000, max: 30000 },
     expectedStatusCodes: {
@@ -45,4 +58,10 @@ monitorSchema.index({ workspaceId: 1, createdAt: -1 });
 monitorSchema.index({ workspaceId: 1, active: 1, createdAt: -1 });
 monitorSchema.index({ workspaceId: 1, name: 1 });
 monitorSchema.index({ workspaceId: 1, intervalSeconds: 1, createdAt: -1 });
+monitorSchema.set("toJSON", {
+  transform: (_doc, ret) => {
+    delete (ret as Record<string, unknown>).encryptedSecrets;
+    return ret;
+  },
+});
 export const Monitor = model("Monitor", monitorSchema);

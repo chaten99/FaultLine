@@ -20,36 +20,48 @@ import {
 } from "./monitor.service.js";
 
 const userId = workspaceOf;
+const safeMonitor = (value: unknown): unknown => {
+  if (value && typeof value === "object") {
+    const plain =
+      "toJSON" in value && typeof value.toJSON === "function"
+        ? (value.toJSON() as Record<string, unknown>)
+        : ({ ...value } as Record<string, unknown>);
+    delete plain.encryptedSecrets;
+    return plain;
+  }
+  return value;
+};
 
 export const list = async (request: Request, response: Response) => {
   const query = listMonitorSchema.parse(request.query);
-  return response.json(
-    await listMonitors(
-      userId(request),
-      query.page,
-      query.pageSize,
-      query.search,
-      query.status,
-      query.sortBy,
-      query.sortOrder,
-    ),
+  const result = await listMonitors(
+    userId(request),
+    query.page,
+    query.pageSize,
+    query.search,
+    query.status,
+    query.sortBy,
+    query.sortOrder,
   );
+  return response.json({ ...result, items: result.items.map(safeMonitor) });
 };
 
 export const create = async (request: Request, response: Response) =>
   response
     .status(201)
-    .json(await createMonitor(userId(request), createMonitorSchema.parse(request.body)));
+    .json(
+      safeMonitor(await createMonitor(userId(request), createMonitorSchema.parse(request.body))),
+    );
 
 export const get = async (request: Request, response: Response) => {
   const { id } = monitorIdSchema.parse(request.params);
-  return response.json(await getMonitor(userId(request), id));
+  return response.json(safeMonitor(await getMonitor(userId(request), id)));
 };
 
 export const update = async (request: Request, response: Response) => {
   const { id } = monitorIdSchema.parse(request.params);
   return response.json(
-    await updateMonitor(userId(request), id, updateMonitorSchema.parse(request.body)),
+    safeMonitor(await updateMonitor(userId(request), id, updateMonitorSchema.parse(request.body))),
   );
 };
 

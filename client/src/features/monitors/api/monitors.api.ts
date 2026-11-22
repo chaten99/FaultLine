@@ -1,10 +1,17 @@
 import { apiClient } from "@/lib/api-client";
 
+import type { MonitorType, HttpConfig, DnsConfig, ProtocolDetails } from "../types-advanced";
+
 export type Monitor = {
   _id: string;
   name: string;
   url: string;
-  method: "GET";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  type?: MonitorType;
+  httpConfig?: HttpConfig;
+  tlsConfig?: { warningDays: number };
+  dnsConfig?: DnsConfig;
+  domainConfig?: { warningDays: number };
   intervalSeconds: number;
   timeoutMs: number;
   expectedStatusCodes: number[];
@@ -25,6 +32,11 @@ export type Monitor = {
 };
 
 export type MonitorCheck = {
+  monitorType?: MonitorType;
+  configRevision?: number;
+  executionDurationMs?: number;
+  details?: ProtocolDetails;
+  underMaintenance?: boolean;
   _id: string;
   monitorId: string;
   userId: string;

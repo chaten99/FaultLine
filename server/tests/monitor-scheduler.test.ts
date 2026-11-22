@@ -29,7 +29,11 @@ describe("Monitor Scheduler Service", () => {
   });
 
   it("schedules recurring monitor check with upsertJobScheduler", async () => {
-    await scheduleMonitor({ _id: "mon-1", intervalSeconds: 60 });
+    await scheduleMonitor({
+      _id: "mon-1",
+      intervalSeconds: 60,
+      workspaceId: "607f1f77bcf86cd799439022",
+    });
 
     expect(mockQueue.upsertJobScheduler).toHaveBeenCalledWith(
       "monitor:mon-1",
@@ -38,6 +42,38 @@ describe("Monitor Scheduler Service", () => {
         name: "execute-monitor-check",
         data: expect.objectContaining({ monitorId: "mon-1", scheduled: true }),
       }),
+    );
+  });
+
+  it.each([undefined, null, "undefined", "malformed"])(
+    "does not schedule a monitor with invalid workspace %s",
+    async (workspaceId) => {
+      await scheduleMonitor({ _id: "legacy-monitor", intervalSeconds: 60, workspaceId });
+      expect(mockQueue.upsertJobScheduler).not.toHaveBeenCalled();
+      expect(mockQueue.removeJobScheduler).toHaveBeenCalledWith("monitor:legacy-monitor");
+    },
+  );
+
+  it("removes legacy schedulers and recreates them only after workspace migration", async () => {
+    const legacy = {
+      _id: "legacy-monitor",
+      intervalSeconds: 60,
+      workspaceId: undefined as string | undefined,
+    };
+    vi.spyOn(Monitor, "find").mockReturnValue({
+      lean: vi.fn().mockResolvedValue([legacy]),
+    } as never);
+    mockQueue.getJobSchedulers.mockResolvedValue([{ key: "monitor:legacy-monitor", every: 60000 }]);
+    await reconcileSchedulers();
+    expect(mockQueue.removeJobScheduler).toHaveBeenCalledWith("monitor:legacy-monitor");
+    expect(mockQueue.upsertJobScheduler).not.toHaveBeenCalled();
+    legacy.workspaceId = "607f1f77bcf86cd799439022";
+    mockQueue.getJobSchedulers.mockResolvedValue([]);
+    await reconcileSchedulers();
+    expect(mockQueue.upsertJobScheduler).toHaveBeenCalledWith(
+      "monitor:legacy-monitor",
+      { every: 60000 },
+      expect.anything(),
     );
   });
 
@@ -68,10 +104,25 @@ describe("Monitor Scheduler Service", () => {
     );
   });
 
+  it("reuses matching BullMQ scheduler keys without recreating recurring jobs", async () => {
+    vi.spyOn(Monitor, "find").mockReturnValue({
+      lean: vi
+        .fn()
+        .mockResolvedValue([
+          { _id: "scoped-monitor", intervalSeconds: 60, workspaceId: "607f1f77bcf86cd799439022" },
+        ]),
+    } as never);
+    mockQueue.getJobSchedulers.mockResolvedValue([{ key: "monitor:scoped-monitor", every: 60000 }]);
+    await reconcileSchedulers();
+    await reconcileSchedulers();
+    expect(mockQueue.upsertJobScheduler).not.toHaveBeenCalled();
+    expect(mockQueue.removeJobScheduler).not.toHaveBeenCalled();
+  });
+
   it("reconciles schedulers by removing stale, updating mismatched, and adding missing schedulers", async () => {
     const activeMonitors = [
-      { _id: "mon-active-1", intervalSeconds: 60 },
-      { _id: "mon-active-2", intervalSeconds: 300 },
+      { _id: "mon-active-1", intervalSeconds: 60, workspaceId: "607f1f77bcf86cd799439022" },
+      { _id: "mon-active-2", intervalSeconds: 300, workspaceId: "607f1f77bcf86cd799439022" },
     ];
 
     vi.spyOn(Monitor, "find").mockReturnValue({
@@ -79,8 +130,8 @@ describe("Monitor Scheduler Service", () => {
     } as unknown as ReturnType<typeof Monitor.find>);
 
     mockQueue.getJobSchedulers.mockResolvedValue([
-      { id: "monitor:mon-active-1", every: 120000 },
-      { id: "monitor:mon-stale-old", every: 60000 },
+      { key: "monitor:mon-active-1", every: 120000 },
+      { key: "monitor:mon-stale-old", every: 60000 },
     ]);
 
     await reconcileSchedulers();

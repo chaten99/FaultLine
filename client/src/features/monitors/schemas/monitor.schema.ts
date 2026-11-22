@@ -2,69 +2,90 @@ import { z } from "zod";
 
 export const monitorIntervals = [60, 300, 600, 900, 1800, 3600] as const;
 
-export const monitorFormSchema = z.object({
-  name: z
-    .string()
-    .trim()
-    .min(1, "Monitor name is required")
-    .max(100, "Monitor name cannot exceed 100 characters"),
-  url: z
-    .string()
-    .trim()
-    .min(1, "Endpoint URL is required")
-    .max(2048, "Endpoint URL is too long")
-    .refine((value) => {
+export const monitorFormSchema = z
+  .object({
+    name: z
+      .string()
+      .trim()
+      .min(1, "Monitor name is required")
+      .max(100, "Monitor name cannot exceed 100 characters"),
+    url: z
+      .string()
+      .trim()
+      .min(1, "Endpoint URL is required")
+      .max(2048, "Endpoint URL is too long")
+      .refine((value) => {
+        if (/^(?=.{3,253}$)[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+\.?$/.test(value)) return true;
+        try {
+          const parsed = new URL(value);
+          return (
+            (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+            !parsed.username &&
+            !parsed.password
+          );
+        } catch {
+          return false;
+        }
+      }, "Enter a valid HTTP or HTTPS URL (e.g. https://api.example.com/health)"),
+    type: z.enum(["http", "tls", "dns", "domain"]).optional(),
+    method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
+    intervalSeconds: z
+      .number()
+      .int()
+      .refine(
+        (value) => monitorIntervals.includes(value as (typeof monitorIntervals)[number]),
+        "Please select a valid interval",
+      ),
+    timeoutMs: z
+      .number()
+      .int()
+      .min(1000, "Timeout must be at least 1,000ms")
+      .max(30000, "Timeout cannot exceed 30,000ms"),
+    expectedStatusCodes: z
+      .string()
+      .trim()
+      .min(1, "At least one expected status code is required")
+      .refine((val) => {
+        const parts = val
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (parts.length === 0 || parts.length > 100) return false;
+        return parts.every((p) => {
+          const num = Number(p);
+          return Number.isInteger(num) && num >= 100 && num <= 599;
+        });
+      }, "Must be valid HTTP status codes (100–599) separated by commas"),
+    failureThreshold: z
+      .number()
+      .int()
+      .min(1, "Failure threshold must be at least 1")
+      .max(10, "Failure threshold cannot exceed 10"),
+    recoveryThreshold: z
+      .number()
+      .int()
+      .min(1, "Recovery threshold must be at least 1")
+      .max(10, "Recovery threshold cannot exceed 10"),
+    active: z.boolean(),
+  })
+  .superRefine((value, ctx) => {
+    if (["http", "tls"].includes(value.type ?? "http")) {
       try {
-        const parsed = new URL(value);
-        return (
-          (parsed.protocol === "http:" || parsed.protocol === "https:") &&
-          !parsed.username &&
-          !parsed.password
-        );
+        const u = new URL(value.url);
+        if (
+          !["http:", "https:"].includes(u.protocol) ||
+          (value.type === "tls" && u.protocol !== "https:")
+        )
+          throw new Error();
       } catch {
-        return false;
+        ctx.addIssue({
+          code: "custom",
+          message: "Enter a valid HTTP or HTTPS endpoint.",
+          path: ["url"],
+        });
       }
-    }, "Enter a valid HTTP or HTTPS URL (e.g. https://api.example.com/health)"),
-  method: z.literal("GET"),
-  intervalSeconds: z
-    .number()
-    .int()
-    .refine(
-      (value) => monitorIntervals.includes(value as (typeof monitorIntervals)[number]),
-      "Please select a valid interval",
-    ),
-  timeoutMs: z
-    .number()
-    .int()
-    .min(1000, "Timeout must be at least 1,000ms")
-    .max(30000, "Timeout cannot exceed 30,000ms"),
-  expectedStatusCodes: z
-    .string()
-    .trim()
-    .min(1, "At least one expected status code is required")
-    .refine((val) => {
-      const parts = val
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      if (parts.length === 0 || parts.length > 20) return false;
-      return parts.every((p) => {
-        const num = Number(p);
-        return Number.isInteger(num) && num >= 100 && num <= 599;
-      });
-    }, "Must be valid HTTP status codes (100–599) separated by commas"),
-  failureThreshold: z
-    .number()
-    .int()
-    .min(1, "Failure threshold must be at least 1")
-    .max(10, "Failure threshold cannot exceed 10"),
-  recoveryThreshold: z
-    .number()
-    .int()
-    .min(1, "Recovery threshold must be at least 1")
-    .max(10, "Recovery threshold cannot exceed 10"),
-  active: z.boolean(),
-});
+    }
+  });
 
 export type MonitorFormValues = z.infer<typeof monitorFormSchema>;
 

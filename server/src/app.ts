@@ -16,6 +16,8 @@ import { invitationRouter, workspaceRouter } from "./modules/workspaces/workspac
 import { profileRouter } from "./modules/profile/profile.routes.js";
 import { notificationRouter } from "./modules/notifications/notification.routes.js";
 
+import { maintenanceRouter } from "./modules/maintenance/maintenance.routes.js";
+
 export const app = express();
 app.set("trust proxy", "loopback, linklocal, uniquelocal");
 app.use(helmet());
@@ -37,13 +39,14 @@ app.use(
     exposedHeaders: ["Content-Disposition"],
   }),
 );
-app.use(express.json({ limit: "10kb" }));
+app.use(express.json({ limit: "32kb" }));
 app.use(express.urlencoded({ extended: false, limit: "10kb" }));
 app.use(cookieParser());
 app.use(requestLogger);
 app.use("/api", healthRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/monitors", monitorRouter);
+app.use("/api/maintenance-windows", maintenanceRouter);
 app.use("/api/incidents", incidentRouter);
 app.use("/api/notifications", notificationRouter);
 app.use("/api/profile", profileRouter);

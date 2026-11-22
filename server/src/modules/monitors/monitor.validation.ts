@@ -1,14 +1,26 @@
 import { z } from "zod";
+import {
+  methods,
+  httpConfigSchema,
+  tlsConfigSchema,
+  dnsConfigSchema,
+  domainConfigSchema,
+} from "./advanced.validation.js";
 import { monitorIntervals } from "./monitor.model.js";
 
 const url = z.string().trim().min(1).max(2048);
-const statusCodes = z.array(z.number().int().min(100).max(599)).min(1).max(20);
+const statusCodes = z.array(z.number().int().min(100).max(599)).min(1).max(100);
 
 export const createMonitorSchema = z
   .object({
     name: z.string().trim().min(1).max(100),
     url,
-    method: z.literal("GET").default("GET"),
+    method: z.enum(methods).default("GET"),
+    type: z.enum(["http", "tls", "dns", "domain"]).default("http"),
+    httpConfig: httpConfigSchema.optional(),
+    tlsConfig: tlsConfigSchema.optional(),
+    dnsConfig: dnsConfigSchema.optional(),
+    domainConfig: domainConfigSchema.optional(),
     intervalSeconds: z
       .number()
       .int()
@@ -25,7 +37,12 @@ export const updateMonitorSchema = z
   .object({
     name: z.string().trim().min(1).max(100).optional(),
     url: url.optional(),
-    method: z.literal("GET").optional(),
+    method: z.enum(methods).optional(),
+    type: z.enum(["http", "tls", "dns", "domain"]).optional(),
+    httpConfig: httpConfigSchema.optional(),
+    tlsConfig: tlsConfigSchema.optional(),
+    dnsConfig: dnsConfigSchema.optional(),
+    domainConfig: domainConfigSchema.optional(),
     intervalSeconds: z
       .number()
       .int()

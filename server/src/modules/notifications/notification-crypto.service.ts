@@ -12,6 +12,8 @@ const getKey = (): Buffer => {
       "NOTIFICATION_NOT_CONFIGURED",
     );
   }
+  if (!/^[a-f0-9]{64}$/i.test(env.NOTIFICATION_ENCRYPTION_KEY))
+    throw new Error("Encryption key must contain exactly 32 bytes encoded as hex.");
   return Buffer.from(env.NOTIFICATION_ENCRYPTION_KEY, "hex");
 };
 

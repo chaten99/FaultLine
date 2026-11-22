@@ -29,6 +29,7 @@ const latencyMatch = (ids: string[], from: Date, to: Date) => ({
   ...eligibleMatch(ids, from, to),
   status: { $in: ["success", "failure"] },
   statusCode: { $type: "number" },
+  monitorType: { $nin: ["tls", "dns", "domain"] },
   responseDurationMs: { $gte: 0 },
 });
 

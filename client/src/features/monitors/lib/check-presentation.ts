@@ -160,11 +160,18 @@ export const presentCheck = (
 
   // Handle specific failure categories and HTTP status codes
   if (check.status === "failure" || check.status === "error") {
-    if (statusCode === 401) {
+    if (failureCategory === "RESPONSE_ASSERTION_FAILED") {
+      summary = "HTTP response received; application validation failed.";
+      detailedExplanation =
+        "The HTTP status was accepted, but one or more response assertions failed. Review the persisted assertion results.";
+      guidance =
+        "Check the response format and configured dot paths, operators and expected values.";
+      classification = "Application response assertion failure";
+    } else if (statusCode === 401) {
       summary = "The endpoint rejected the request.";
       detailedExplanation = `FaultLine successfully connected to the endpoint, but the server returned HTTP 401 Unauthorized. The configured expected status was [${expectedCodesFormatted}], so this check was marked as failed.`;
       guidance =
-        "The endpoint may require authentication or access permissions. FaultLine currently uses standard GET requests without custom authentication headers. Verify whether a public health check URL is available, or add 401 to the expected status codes if this response is intentional.";
+        "The endpoint may require authentication or access permissions. Review the configured authentication method and replace expired credentials in Advanced settings. Add 401 to accepted status codes only if this response is intentional.";
       classification = "Target endpoint health failure (HTTP 401)";
     } else if (statusCode === 403) {
       summary = "The server understood the request but denied access.";
@@ -242,6 +249,17 @@ export const presentCheck = (
       summary = check.errorMessage.replace(/^\[[A-Z_]+\]\s*/, "");
       detailedExplanation = check.errorMessage;
     }
+  }
+
+  if (check.status === "success" && check.monitorType && check.monitorType !== "http") {
+    summary =
+      check.monitorType === "dns"
+        ? "DNS records matched the configured expectations."
+        : check.monitorType === "tls"
+          ? "TLS certificate is valid and outside the warning threshold."
+          : "Authoritative domain registration expiry is outside the warning threshold.";
+    detailedExplanation = summary;
+    classification = "Successful " + check.monitorType.toUpperCase() + " check";
   }
 
   // Sanitize any raw error message for safe display in diagnostics

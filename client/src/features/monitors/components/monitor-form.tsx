@@ -28,6 +28,9 @@ import type { Monitor, MonitorInput } from "../api/monitors.api";
 import { getApiErrorMessage, getApiFieldErrors } from "@/lib/api-error";
 import { cn } from "@/lib/utils";
 
+import { AdvancedHttpFields, emptyHttpConfig, validateHttpForm } from "./advanced-http-fields";
+import type { HttpConfig, DnsConfig, MonitorType } from "../types-advanced";
+
 interface MonitorFormProps {
   mode: "create" | "edit";
   initialData?: Monitor | null;
@@ -44,27 +47,35 @@ const intervalDescriptions: Record<number, string> = {
   3600: "Every 1 hour",
 };
 
-const timeoutPresets = [
-  { label: "5 seconds", seconds: 5, ms: 5000 },
-  { label: "10 seconds", seconds: 10, ms: 10000 },
-  { label: "15 seconds", seconds: 15, ms: 15000 },
-  { label: "30 seconds", seconds: 30, ms: 30000 },
-];
-
 const statusCodePresets = [
   { label: "200 OK", value: "200" },
-  { label: "2xx responses", value: "200, 201, 202, 204" },
-  { label: "2xx and 3xx responses", value: "200, 201, 202, 204, 301, 302, 307, 308" },
+  {
+    label: "All 2xx responses",
+    value: Array.from({ length: 100 }, (_, i) => String(200 + i)).join(", "),
+  },
+  { label: "201 Created", value: "201" },
+  { label: "204 No Content", value: "204" },
 ];
 
 export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFormProps) {
   const [apiError, setApiError] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(mode === "edit");
 
+  const [httpConfig, setHttpConfig] = useState<HttpConfig>(
+    initialData?.httpConfig ?? emptyHttpConfig,
+  );
+  const [dnsConfig, setDnsConfig] = useState<DnsConfig>(
+    initialData?.dnsConfig ?? { recordType: "A", expectedValues: [], comparison: "includes" },
+  );
+  const [warningDays, setWarningDays] = useState(
+    initialData?.tlsConfig?.warningDays ?? initialData?.domainConfig?.warningDays ?? 30,
+  );
+
   const defaultValues: MonitorFormValues = {
     name: initialData?.name ?? "",
     url: initialData?.url ?? "",
-    method: "GET",
+    method: initialData?.method ?? "GET",
+    type: initialData?.type ?? "http",
     intervalSeconds: initialData?.intervalSeconds ?? 300,
     timeoutMs: initialData?.timeoutMs ?? 10000,
     expectedStatusCodes: initialData?.expectedStatusCodes
@@ -88,6 +99,8 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
     mode: "onBlur",
   });
 
+  const monitorType = watch("type") ?? "http";
+  const method = watch("method");
   const selectedInterval = watch("intervalSeconds");
   const currentTimeoutMs = watch("timeoutMs");
   const currentStatusCodes = watch("expectedStatusCodes");
@@ -101,7 +114,8 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
       const payload: MonitorInput = {
         name: values.name.trim(),
         url: values.url.trim(),
-        method: "GET",
+        method: values.method,
+        type: values.type ?? "http",
         intervalSeconds: Number(values.intervalSeconds),
         timeoutMs: Number(values.timeoutMs),
         expectedStatusCodes: parseStatusCodes(values.expectedStatusCodes),
@@ -109,6 +123,21 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
         recoveryThreshold: Number(values.recoveryThreshold),
         active: Boolean(values.active),
       };
+      if (monitorType === "http") {
+        const message = validateHttpForm(httpConfig, values.method);
+        if (message) {
+          setApiError(message);
+          return;
+        }
+        payload.httpConfig = httpConfig;
+      }
+      if (monitorType === "tls") payload.tlsConfig = { warningDays };
+      if (monitorType === "domain") payload.domainConfig = { warningDays };
+      if (monitorType === "dns")
+        payload.dnsConfig = {
+          ...dnsConfig,
+          expectedValues: dnsConfig.expectedValues.filter((v) => v.trim().length > 0),
+        };
       await onSubmit(payload);
     } catch (err) {
       const message = getApiErrorMessage(err);
@@ -146,7 +175,24 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
         </div>
       )}
 
-      {/* Section A — Monitor details */}
+      <section className="space-y-2">
+        <Label htmlFor="monitor-type">Monitoring type</Label>
+        <Select
+          value={monitorType}
+          disabled={mode === "edit" || isSubmitting}
+          onValueChange={(v) => setValue("type", v as MonitorType)}
+        >
+          <SelectTrigger id="monitor-type">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="http">HTTP / API</SelectItem>
+            <SelectItem value="tls">SSL / TLS certificate</SelectItem>
+            <SelectItem value="dns">DNS records</SelectItem>
+            <SelectItem value="domain">Domain registration expiry</SelectItem>
+          </SelectContent>
+        </Select>
+      </section>
       <section className="space-y-4">
         <div className="space-y-1.5">
           <Label htmlFor="monitor-name">
@@ -175,7 +221,12 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
         <div className="space-y-1.5">
           <div className="flex items-center gap-1.5">
             <Label htmlFor="monitor-url">
-              API endpoint <span className="text-destructive">*</span>
+              {monitorType === "http"
+                ? "API endpoint"
+                : monitorType === "tls"
+                  ? "HTTPS endpoint"
+                  : "Domain / hostname"}{" "}
+              <span className="text-destructive">*</span>
             </Label>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -197,8 +248,12 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
             <Globe className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               id="monitor-url"
-              type="url"
-              placeholder="https://api.example.com/health"
+              type="text"
+              placeholder={
+                ["http", "tls"].includes(monitorType)
+                  ? "https://api.example.com/health"
+                  : "example.com"
+              }
               disabled={isSubmitting}
               className="pl-9"
               aria-invalid={Boolean(errors.url)}
@@ -218,7 +273,70 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
         </div>
       </section>
 
-      {/* Section B — Monitoring frequency */}
+      {monitorType === "dns" && (
+        <section className="space-y-3">
+          <Label htmlFor="dns-record-type">DNS record type</Label>
+          <Select
+            value={dnsConfig.recordType}
+            onValueChange={(v) =>
+              setDnsConfig({ ...dnsConfig, recordType: v as DnsConfig["recordType"] })
+            }
+          >
+            <SelectTrigger id="dns-record-type">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {["A", "AAAA", "CNAME", "MX", "TXT", "NS"].map((v) => (
+                <SelectItem key={v} value={v}>
+                  {v}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Label htmlFor="dns-expected">Expected records (one per line, optional)</Label>
+          <textarea
+            id="dns-expected"
+            className="w-full rounded border p-3 bg-background font-mono text-sm"
+            value={dnsConfig.expectedValues.join("\n")}
+            onChange={(e) =>
+              setDnsConfig({ ...dnsConfig, expectedValues: e.target.value.split("\n") })
+            }
+          />
+          <Select
+            value={dnsConfig.comparison}
+            onValueChange={(v) =>
+              setDnsConfig({ ...dnsConfig, comparison: v as DnsConfig["comparison"] })
+            }
+          >
+            <SelectTrigger aria-label="DNS comparison">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="includes">Contains all expected records</SelectItem>
+              <SelectItem value="exact">Matches expected records exactly</SelectItem>
+            </SelectContent>
+          </Select>
+        </section>
+      )}
+      {["tls", "domain"].includes(monitorType) && (
+        <section className="space-y-2">
+          <Label htmlFor="warning-days">Warn when expiry is within (days)</Label>
+          <Input
+            id="warning-days"
+            type="number"
+            min={1}
+            max={365}
+            value={warningDays}
+            onChange={(e) => setWarningDays(Number(e.target.value))}
+          />
+          {monitorType === "domain" && (
+            <p className="text-xs text-muted-foreground">
+              Registry RDAP data is cached for six hours. Unsupported or unavailable expiry dates
+              remain unknown.
+            </p>
+          )}
+        </section>
+      )}
       <section className="space-y-1.5">
         <Label htmlFor="monitor-interval">How often should we check?</Label>
         <Select
@@ -250,7 +368,6 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
         )}
       </section>
 
-      {/* Section C & D — Advanced settings (Collapsible) */}
       <Collapsible
         open={advancedOpen}
         onOpenChange={setAdvancedOpen}
@@ -272,111 +389,89 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
         </CollapsibleTrigger>
 
         <CollapsibleContent className="pt-4 space-y-5">
-          {/* Section C1: Request method */}
-          <div className="space-y-1.5 border-t border-border/60 pt-3">
-            <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Request method
-            </Label>
-            <div className="flex items-center gap-2">
-              <div className="inline-flex items-center rounded-md border border-border bg-muted/60 px-2.5 py-1 text-xs font-mono font-medium text-foreground">
-                GET
-              </div>
-              <span className="text-xs text-muted-foreground">
-                FaultLine currently uses GET requests.
-              </span>
-            </div>
-          </div>
-
-          {/* Section C2: Request timeout */}
-          <div className="space-y-2 border-t border-border/60 pt-3">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="monitor-timeout">Maximum time to wait for a response</Label>
-              <span className="text-xs font-mono text-muted-foreground">{timeoutSeconds}s</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Input
-                id="monitor-timeout"
-                type="number"
-                min={1}
-                max={30}
-                step={1}
-                value={timeoutSeconds}
-                disabled={isSubmitting}
-                onChange={(e) => {
-                  const val = Number(e.target.value);
-                  const clamped = Math.max(1, Math.min(30, val || 1));
-                  setValue("timeoutMs", clamped * 1000, { shouldValidate: true });
-                }}
-                className="w-28 font-mono"
-              />
-              <span className="text-sm text-muted-foreground">seconds</span>
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-              <span className="text-xs text-muted-foreground mr-1">Presets:</span>
-              {timeoutPresets.map((preset) => (
-                <button
-                  key={preset.seconds}
-                  type="button"
-                  disabled={isSubmitting}
-                  onClick={() => setValue("timeoutMs", preset.ms, { shouldValidate: true })}
-                  className={cn(
-                    "rounded-md border px-2 py-0.5 text-xs transition-colors",
-                    currentTimeoutMs === preset.ms
-                      ? "border-foreground bg-foreground text-background font-medium"
-                      : "border-border bg-background text-muted-foreground hover:border-foreground/40 hover:text-foreground",
-                  )}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-            {errors.timeoutMs && (
-              <p className="text-xs text-destructive">{errors.timeoutMs.message}</p>
-            )}
-          </div>
-
-          {/* Section C3: Expected status codes */}
-          <div className="space-y-2 border-t border-border/60 pt-3">
-            <Label htmlFor="monitor-status-codes">What counts as a successful response?</Label>
-            <p className="text-xs text-muted-foreground">
-              FaultLine marks a check as successful when the endpoint returns one of these HTTP
-              status codes.
-            </p>
+          <div className="space-y-2">
+            <Label htmlFor="check-timeout">Maximum check time (seconds)</Label>
             <Input
-              id="monitor-status-codes"
-              placeholder="e.g. 200, 201, 204"
-              disabled={isSubmitting}
-              className="font-mono text-sm"
-              aria-invalid={Boolean(errors.expectedStatusCodes)}
-              {...register("expectedStatusCodes")}
+              id="check-timeout"
+              type="number"
+              min={1}
+              max={30}
+              value={timeoutSeconds}
+              onChange={(e) =>
+                setValue(
+                  "timeoutMs",
+                  Math.max(1, Math.min(30, Number(e.target.value) || 1)) * 1000,
+                  { shouldValidate: true },
+                )
+              }
             />
-            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-              <span className="text-xs text-muted-foreground mr-1">Presets:</span>
-              {statusCodePresets.map((preset) => (
-                <button
-                  key={preset.label}
-                  type="button"
-                  disabled={isSubmitting}
-                  onClick={() =>
-                    setValue("expectedStatusCodes", preset.value, { shouldValidate: true })
-                  }
-                  className={cn(
-                    "rounded-md border px-2 py-0.5 text-xs transition-colors",
-                    currentStatusCodes === preset.value
-                      ? "border-foreground bg-foreground text-background font-medium"
-                      : "border-border bg-background text-muted-foreground hover:border-foreground/40 hover:text-foreground",
-                  )}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-            {errors.expectedStatusCodes && (
-              <p className="text-xs text-destructive">{errors.expectedStatusCodes.message}</p>
-            )}
           </div>
+          {monitorType === "http" && (
+            <div className="space-y-5">
+              <div className="space-y-1.5 border-t border-border/60 pt-3">
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  Request method
+                </Label>
+                <Select
+                  value={method}
+                  onValueChange={(v) => setValue("method", v as MonitorFormValues["method"])}
+                >
+                  <SelectTrigger aria-label="Request method">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["GET", "POST", "PUT", "PATCH", "DELETE"].map((v) => (
+                      <SelectItem key={v} value={v}>
+                        {v}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <AdvancedHttpFields value={httpConfig} onChange={setHttpConfig} method={method} />
+              </div>
 
-          {/* Section D: Incident behavior */}
+              <div className="space-y-2 border-t border-border/60 pt-3">
+                <Label htmlFor="monitor-status-codes">What counts as a successful response?</Label>
+                <p className="text-xs text-muted-foreground">
+                  FaultLine marks a check as successful when the endpoint returns one of these HTTP
+                  status codes.
+                </p>
+                <Input
+                  id="monitor-status-codes"
+                  placeholder="e.g. 200, 201, 204"
+                  disabled={isSubmitting}
+                  className="font-mono text-sm"
+                  aria-invalid={Boolean(errors.expectedStatusCodes)}
+                  {...register("expectedStatusCodes")}
+                />
+                <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                  <span className="text-xs text-muted-foreground mr-1">Presets:</span>
+                  {statusCodePresets.map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      disabled={isSubmitting}
+                      onClick={() =>
+                        setValue("expectedStatusCodes", preset.value, { shouldValidate: true })
+                      }
+                      className={cn(
+                        "rounded-md border px-2 py-0.5 text-xs transition-colors",
+                        currentStatusCodes === preset.value
+                          ? "border-foreground bg-foreground text-background font-medium"
+                          : "border-border bg-background text-muted-foreground hover:border-foreground/40 hover:text-foreground",
+                      )}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+                {errors.expectedStatusCodes && (
+                  <p className="text-xs text-destructive">{errors.expectedStatusCodes.message}</p>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="space-y-3 border-t border-border/60 pt-3">
             <div>
               <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -439,7 +534,6 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
         </CollapsibleContent>
       </Collapsible>
 
-      {/* Section E — Start monitoring */}
       <section className="flex items-start justify-between gap-4 rounded-lg border border-border bg-card/30 p-4">
         <div className="space-y-0.5">
           <Label
@@ -460,7 +554,6 @@ export function MonitorForm({ mode, initialData, onSubmit, onCancel }: MonitorFo
         />
       </section>
 
-      {/* Dialog footer */}
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3 border-t border-border pt-4">
         <Button type="button" variant="outline" disabled={isSubmitting} onClick={onCancel}>
           Cancel
